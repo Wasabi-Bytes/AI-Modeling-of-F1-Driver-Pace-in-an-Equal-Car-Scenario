@@ -6,38 +6,39 @@ Built a motorsport analytics pipeline to uncover **true driver performance** by 
 
 ## Project Overview
 Using **FastF1 telemetry**, this project models how drivers perform with identical machinery.  
-We combine **race pace** and **qualifying pace**, then run **Monte Carlo season simulations** to crown fair Drivers’ and Constructors’ Champions.  
+We combine **within-team race pace** and **within-team qualifying pace**, then run **Monte Carlo season simulations** to crown fair Drivers’ and Constructors’ Champions.  
 
 **Highlights:**
-- Focus on the **last 5 races** for recency & efficiency  
-- **Race pace**: lap-time model adjusted for tyre compound, tyre age, and fuel load  
-- **Quali pace**: median of top flying laps on Softs (cleaned of track-limit deletions if available)  
+- Focus on the **last 10–12 races**, with **recency weighting** to balance form and sample size  
+- **Race pace**: lap-time model adjusted for tyre compound, tyre age, fuel load, and normalized within each team  
+- **Quali pace**: best valid laps compared relative to teammate(s), adjusted for track evolution across Q1–Q3  
 - **Monte Carlo**: thousands of simulated seasons with DNFs & randomness  
-- **Visuals**: animated race replay on Montreal with optional driver face PNGs  
+- **Visuals**: animated equal-car race replay on Montreal with optional driver face PNGs  
 
 ---
 
 ## Hypothesis
-> With equal cars, **Lance Stroll, Max Verstappen, or Lewis Hamilton** emerge as leading championship contenders.  
+> With equal cars, **drivers who consistently outperform their teammates** (e.g., Verstappen, Hamilton, Alonso) should rise to the top, while car-driven gaps flatten out.  
 
 ---
 
 ## Workflow
-1. **Load** last 5 races via FastF1  
+1. **Load** last 10–12 races via FastF1  
 2. **Clean** laps (remove pits, outliers, SC/VSC)  
-3. **Model race pace** using either:
-   - **OLS regression** per event:  
-     `LapTimeSeconds ~ driver + compound + lap_on_tyre + lap_number`  
-   - **Simple correction factors**: normalize each lap for compound offsets, tyre degradation, and fuel load  
-4. **Add quali metric** (median of top-k valid laps)  
-5. **Aggregate** performance across events with uncertainty weighting  
+3. **Model race pace** using either:  
+   - **Team-controlled regression** per event:  
+     `LapTimeSeconds ~ team + driver_within_team + compound + lap_on_tyre + lap_number`  
+     → captures driver deltas relative to teammates, removing car advantage  
+   - **Correction-factor model with team demeaning**  
+4. **Add quali metric** (best valid laps, teammate-normalized, session-adjusted)  
+5. **Aggregate** performance across events with uncertainty weighting + recency decay  
 6. **Visualize** equal-car race animation (Montreal)  
 7. **Simulate** thousands of seasons (Drivers & Constructors)  
 
 ---
 
 ## Outputs
-- **Driver rankings** under equal cars  
+- **Driver rankings** under equal cars (teammate-controlled)  
 - **Interactive race replay** (Montreal track)  
 - **Championship forecasts**: driver win % and constructor standings  
 
@@ -51,4 +52,4 @@ We combine **race pace** and **qualifying pace**, then run **Monte Carlo season 
   - Stochastic SC/VSC events  
   - Pit window models and overtaking probability  
   - Sprint weekends & penalty models  
-  - Bayesian shrinkage for small-sample drivers  
+  - Hierarchical/Bayesian shrinkage for small-sample drivers  
