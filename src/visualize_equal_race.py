@@ -74,6 +74,10 @@ def _infer_driver_cols(df: pd.DataFrame) -> str:
     return df.columns[0]
 
 def _get_driver_team_map_from_recent() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, int]]:
+    """
+    Pulls a recent race to infer driver->team, display name, and number.
+    Falls back gracefully if columns differ by event.
+    """
     try:
         cfg = load_config("config/config.yaml")
         if "cache_dir" in cfg:
@@ -86,56 +90,69 @@ def _get_driver_team_map_from_recent() -> Tuple[Dict[str, str], Dict[str, str], 
 
         dcol = _infer_driver_cols(laps)
         drivers = laps[[dcol]].dropna().astype(str).drop_duplicates()
-        team_col = "Team" if "Team" in laps.columns else None
+        team_col = None
+        for cand in ["team", "Team", "Constructor", "TeamName", "ConstructorName"]:
+            if cand in laps.columns:
+                team_col = cand
+                break
         name_col = None
         for cand in ["Abbreviation", "FullName", "BroadcastName", "Driver", "DriverId"]:
             if cand in laps.columns:
                 name_col = cand
                 break
-        num_col = "DriverNumber" if "DriverNumber" in laps.columns else None
+        num_col = None
+        for cand in ["DriverNumber", "Number", "CarNumber"]:
+            if cand in laps.columns:
+                num_col = cand
+                break
 
         team_map, name_map, num_map = {}, {}, {}
         for dr in drivers[dcol].tolist():
             sub = laps[laps[dcol].astype(str) == dr]
+            # team
             if team_col:
                 tser = sub[team_col].dropna()
-                team = tser.iloc[0] if not tser.empty else "UNKNOWN"
+                team = str(tser.iloc[0]) if not tser.empty else "UNKNOWN"
             else:
                 team = "UNKNOWN"
+            # name
             if name_col:
                 nser = sub[name_col].dropna()
-                nm = nser.iloc[0] if not nser.empty else str(dr)
+                nm = str(nser.iloc[0]) if not nser.empty else str(dr)
             else:
                 nm = str(dr)
+            # number
             if num_col:
                 nnum = pd.to_numeric(sub[num_col], errors="coerce").dropna()
                 nn = int(nnum.iloc[0]) if not nnum.empty else 999
             else:
                 nn = 999
-            team_map[str(dr)] = str(team)
-            name_map[str(dr)] = str(nm)
-            num_map[str(dr)] = int(nn)
+            team_map[str(dr)] = team
+            name_map[str(dr)] = nm
+            num_map[str(dr)] = nn
         return team_map, name_map, num_map
     except Exception:
         return {}, {}, {}
 
 # ------------------- Inputs -------------------
 def load_driver_ranking() -> pd.DataFrame:
+    """
+    Load aggregated equal-car deltas.
+    Prefers 'agg_delta_s'; falls back to similarly named columns if needed.
+    """
     path = PROJ / "outputs" / "aggregate" / "driver_ranking.csv"
     if not path.exists():
         raise FileNotFoundError(f"driver_ranking.csv not found at {path}")
     df = pd.read_csv(path)
     low = {c.lower(): c for c in df.columns}
+
     driver_col = low.get("driver", list(df.columns)[0])
-    delta_col = low.get("agg_delta_s")
+    # prefer agg_delta_s, else try a few fallbacks
+    delta_col = low.get("agg_delta_s") or low.get("equal_delta_s") or low.get("delta_s") or low.get("agg_delta")
+    if delta_col is None:
+        raise ValueError("Could not find aggregated delta column (expected 'agg_delta_s') in driver_ranking.csv")
+
     se_col = low.get("agg_se_s")
-    if delta_col is None:
-        for cand in ["delta_s", "agg_delta", "equal_delta_s"]:
-            if cand in low:
-                delta_col = low[cand]
-                break
-    if delta_col is None:
-        raise ValueError("Could not find aggregated delta column (agg_delta_s) in driver_ranking.csv")
 
     keep = [driver_col, delta_col] + ([se_col] if se_col else [])
     out = df[keep].copy()
@@ -144,8 +161,10 @@ def load_driver_ranking() -> pd.DataFrame:
         out.rename(columns={se_col: "agg_se_s"}, inplace=True)
     else:
         out["agg_se_s"] = np.nan
+
     out["driver"] = out["driver"].astype(str)
-    out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
+    out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce").fillna(out["agg_delta_s"].median())
+    out["agg_se_s"] = pd.to_numeric(out["agg_se_s"], errors="coerce")
     return out
 
 def load_montreal_outline(cfg: dict) -> np.ndarray:
@@ -234,8 +253,6 @@ def simulate_progress(
     adv_pts = adv_pts[: stop_idx + 1]
     lap_key = lap_key[: stop_idx + 1]
     completed_laps = completed_laps[: stop_idx + 1]
-    lap_progress = lap_progress[: stop_idx + 1]
-    T = adv_pts.shape[0]
 
     # Positions
     idx = (adv_pts.astype(int) % path_pts)  # (T, D)
@@ -281,7 +298,7 @@ def build_animation(
         subplot_titles=("Equal-Car Montreal Replay", "Leaderboard (live)"),
     )
 
-    # Track outline (kept as first trace so frames index correctly)
+    # Track outline
     fig.add_trace(
         go.Scatter(
             x=xy_path[:, 0], y=xy_path[:, 1],
