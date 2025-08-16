@@ -5,6 +5,12 @@ __pycache__/
 
 .cache/
 
+# .gitignore
+outputs/
+data/cache/
+*.sqlite
+
+
 
 # C extensions
 *.so
