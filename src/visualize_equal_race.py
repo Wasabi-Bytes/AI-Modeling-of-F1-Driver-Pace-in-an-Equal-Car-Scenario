@@ -21,6 +21,7 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 BASE_LAP_SEC = 90.0
 N_LAPS = 20
 DT = 0.5
+
 LAP_JITTER_SD = 0.12
 DEGRADE_S_PER_LAP = 0.00
 START_REACTION_SD = 0.12
@@ -28,7 +29,7 @@ START_REACTION_SD = 0.12
 USE_EVENT_SPECIFIC_DELTAS = True
 TARGET_GP_SUBSTR = "canadian"  # e.g. "british", "austrian", "hungarian"
 
-DRS_TAG = "ⓓ"  # shown in table when a car has DRS this lap
+DRS_TAG = "ⓓ"  # marks DRS on leaderboard gaps
 
 # DRS & blocking
 DRS_DETECTION_THRESH_S = 1.0
@@ -56,13 +57,13 @@ SC_STAGGER_GAP_FRAC = 0.003
 # Reliability (optional)
 RELIABILITY_DNF_PER_LAP = 0.0
 
-# Playback buttons
+# Playback speeds
 RANDOM_SEED = 42
-PLAYBACK_CHOICES = [5.0, 10.0, 20.0]
+PLAYBACK_CHOICES = [5.0, 10.0, 20.0, 100.0]  # added 100×
 
 # UI
 SHOW_MARKER_LABELS = False
-RC_WRAP_WIDTH = 44
+RC_WRAP_WIDTH = 48
 
 # ------------------- Utilities -------------------
 def _darken_hex(hex_color: str, factor: float = 0.75) -> str:
@@ -263,8 +264,7 @@ def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[st
             for d in ds_sorted[1:]: colors[d] = base
     return colors
 
-# ------------------- Simulation (same as previous version) -------------------
-# (unchanged core logic; only the figure layout changed)
+# ------------------- Simulation -------------------
 def simulate_progress(
     ranking: pd.DataFrame,
     xy_path: np.ndarray,
@@ -306,7 +306,6 @@ def simulate_progress(
     drs_disabled_laps_remaining = DRS_MIN_ENABLE_LAP - 1
 
     phase = "GREEN"; vsc_ticks_remaining = 0; sc_laps_remaining = 0
-    leader_last_completed = 0
 
     start_penalty = rng.normal(0.0, START_REACTION_SD, size=D)
     start_penalty_pts = start_penalty * speed_pts_per_sec[0, :]
@@ -325,7 +324,8 @@ def simulate_progress(
         if curr_lap[i_follow] != curr_lap[i_lead]: return 99.0
         dp = (curr_pts[i_lead] - curr_pts[i_follow])
         if dp < 0: dp += P
-        v = (P / (BASE_LAP_SEC + deltas[i_follow]))  # rough fallback if needed
+        L = min(curr_lap[i_follow], n_laps-1)
+        v = (P / lap_times[L, i_follow])  # use current-lap follower pace
         return float(dp / max(v, 1e-6))
 
     def _in_range(prev: float, now: float, target: int) -> bool:
@@ -426,24 +426,22 @@ def simulate_progress(
                     phase = "GREEN"
                     _log("SAFETY CAR IN — GREEN FLAG (DRS delayed)", sim_time)
 
+        drs_enabled = (phase == "GREEN") and (leader_completed + 1 >= DRS_MIN_ENABLE_LAP)
+        has_drs = np.zeros(D, dtype=bool)
+
         if phase == "GREEN":
             order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
             # blocking (outside zones)
             for k in range(1, len(order)):
                 i_lead = order[k-1]; i_foll = order[k]
                 if curr_lap[i_lead] >= n_laps or curr_lap[i_foll] >= n_laps: continue
-                # quick gap approx (fallback)
-                dp = curr_pts[i_lead] - curr_pts[i_foll]
-                if dp < 0: dp += P
-                v = P / (BASE_LAP_SEC + deltas[i_foll])
-                gap_s = float(dp / max(v, 1e-6))
-                in_any_zone = any(_is_in_zone(curr_pts[i_foll], z) for z in _find_drs_zones(xy_path))
-                if (gap_s <= BLOCKING_THRESH_S) and (not in_any_zone) and (not defended_this_lap[i_lead]) and (np.random.random() < P_DEFEND):
-                    _apply_defense(i_lead); _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+{DEFENSE_TIME_COST:.02f}s)", sim_time)
-
-        # DRS global enable rule
-        drs_enabled = (phase == "GREEN") and (leader_completed + 1 >= DRS_MIN_ENABLE_LAP)
-        has_drs = np.zeros(D, dtype=bool)
+                in_any_zone = any(((zs <= curr_pts[i_foll] <= ze) if zs <= ze
+                                   else (curr_pts[i_foll] >= zs or curr_pts[i_foll] <= ze))
+                                  for (zs, ze, _) in zones)
+                if not in_any_zone:
+                    gap_s = _gap_seconds(i_foll, i_lead)
+                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (np.random.random() < P_DEFEND):
+                        _apply_defense(i_lead); _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+{DEFENSE_TIME_COST:.02f}s)", sim_time)
 
         # DRS detection & passes
         if phase == "GREEN":
@@ -457,11 +455,7 @@ def simulate_progress(
                             if pos > 0:
                                 ahead = order[pos-1]
                                 if curr_lap[ahead] >= n_laps: continue
-                                # quick gap estimate at detection
-                                dp = curr_pts[ahead] - curr_pts[idx]
-                                if dp < 0: dp += P
-                                v = P / (BASE_LAP_SEC + deltas[idx])
-                                gap_s = float(dp / max(v, 1e-6))
+                                gap_s = _gap_seconds(idx, ahead)
                                 if gap_s <= det_eff:
                                     drs_eligible[zid][idx] = (ahead, gap_s)
                                     has_drs[idx] = True
@@ -477,11 +471,9 @@ def simulate_progress(
                             _attempt_pass(idx, ahead, gap_at_det, sim_time)
                         drs_eligible[zid].pop(idx, None)
 
-        # Collect frame
+        # Frame buffers
         pos_idx = np.mod(curr_pts.astype(int), P)
-        frame_xy = np.stack([xy_path[pos_idx, 0], xy_path[pos_idx, 1]], axis=1)
-        positions_list.append(frame_xy)
-
+        positions_list.append(np.stack([xy_path[pos_idx, 0], xy_path[pos_idx, 1]], axis=1))
         lk = curr_lap.astype(float) + (curr_pts / P)
         lapkey_list.append(lk)
         leaderlap_list.append(min(n_laps, int(curr_lap.max()) + 1))
@@ -499,17 +491,14 @@ def simulate_progress(
                 if lap_diff > 0:
                     gaps.append(f"+{lap_diff} Lap" + ("s" if lap_diff > 1 else ""))
                 else:
-                    dp = curr_pts[order[0]] - curr_pts[idx]
-                    if dp < 0: dp += P
-                    v = P / (BASE_LAP_SEC + deltas[idx])
-                    g = float(dp / max(v, 1e-6))
+                    g = _gap_seconds(idx, order[0])
                     gaps.append("+—" if g >= 98.0 else f"+{g:,.3f}")
                 if drs_enabled and has_drs[idx]: gaps[-1] += f" {DRS_TAG}"
         gaps_panel.append(gaps)
 
         recent = [f"t={sim_time:5.1f}s  {m}" for (t, m) in event_log if t <= sim_time]
-        wrapped = [_wrap_line(r, width=RC_WRAP_WIDTH) for r in recent[-8:]]
-        rc_texts.append("<br>".join(wrapped) if wrapped else "—")
+        wrapped = [_wrap_line(r, width=RC_WRAP_WIDTH) for r in recent[-12:]]
+        rc_texts.append(wrapped if wrapped else ["—"])
 
         sim_time += DT
         if (curr_lap >= n_laps).all(): break
@@ -541,62 +530,68 @@ def build_animation(
     names = [name_map.get(dr, dr) for dr in drivers]
     colors = [color_map.get(dr, "#888888") for dr in drivers]
 
-    # --- Layout: 2 rows x 2 cols. Left col spans both rows for the TRACK.
+    # 2×2 layout; left col spans both rows for the TRACK.
     fig = make_subplots(
         rows=2, cols=2,
         specs=[[{"type": "xy", "rowspan": 2}, {"type": "table"}],
-               [None, {"type": "scatter"}]],
-        column_widths=[0.62, 0.38],
+               [None, {"type": "table"}]],  # RC is now a table (always visible)
+        column_widths=[0.60, 0.40],
+        row_heights=[0.72, 0.28],          # give leaderboard more vertical room (fits 20 rows)
         horizontal_spacing=0.05,
         vertical_spacing=0.08,
         subplot_titles=("Equal-Car Replay", "Leaderboard (live)", "Race Control"),
     )
 
-    # TRACK (trace order 0)
+    # TRACK (trace 0)
     track_col0 = _track_color(phase_flags[0] if len(phase_flags) else "GREEN")
     fig.add_trace(go.Scatter(x=xy_path[:,0], y=xy_path[:,1], mode="lines",
                              line=dict(width=2, color=track_col0),
                              hoverinfo="skip", showlegend=False, name="Track"), row=1, col=1)
 
-    # CARS (trace order 1)
+    # CARS (trace 1)
     mode0 = "markers+text" if SHOW_MARKER_LABELS else "markers"
     fig.add_trace(go.Scatter(x=positions[0,:,0], y=positions[0,:,1], mode=mode0,
                              text=(labels if SHOW_MARKER_LABELS else None), textposition="top center",
                              marker=dict(size=12, line=dict(width=1, color="#222"), color=colors),
                              hovertext=names, hoverinfo="text", showlegend=True, name="Cars"), row=1, col=1)
 
-    # SC marker placeholder (trace order 2)
+    # SC marker placeholder (trace 2)
     fig.add_trace(go.Scatter(), row=1, col=1)
 
-    # Legend entries (trace orders 3..(2+D))
+    # Legend entries (trace 3..2+D)
     for nm, col in zip(names, colors):
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
                                  marker=dict(size=12, color=col, line=dict(width=1, color="#222")),
                                  name=nm, showlegend=True), row=1, col=1)
 
-    # TABLE (trace order 3+D)
+    # Leaderboard table (trace 3+D)
     order0 = orders[0]
     table_positions = list(range(1, D+1))
     table_drivers = [labels[i] for i in order0]
     table_gaps = gaps_panel[0]
-    table = go.Table(
-        columnwidth=[0.20, 0.40, 0.40],
+    leaderboard = go.Table(
+        columnwidth=[0.22, 0.38, 0.40],
         header=dict(values=["<b>Position</b>", "<b>Driver</b>", "<b>Time</b>"],
                     fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
         cells=dict(values=[table_positions, table_drivers, table_gaps],
-                   fill_color="#0f1720", font=dict(color="white", size=12), align="left",
-                   height=24)
+                   fill_color="#0f1720", font=dict(color="white", size=12),
+                   align="left", height=22)  # 22px ⇒ 20 rows fit
     )
-    fig.add_trace(table, row=1, col=2)
+    fig.add_trace(leaderboard, row=1, col=2)
 
-    # RACE CONTROL (trace order 4+D)
-    rc0 = rc_texts[0] if len(rc_texts) else "—"
-    fig.add_trace(go.Scatter(x=[0.02], y=[0.98], mode="text", text=[rc0],
-                             textposition="top left", textfont=dict(size=12),
-                             showlegend=False, name="Race Control"),
-                  row=2, col=2)
+    # Race Control table (trace 4+D)
+    rc0_lines = rc_texts[0] if len(rc_texts) else ["—"]
+    rc_table = go.Table(
+        columnwidth=[1.0],
+        header=dict(values=["<b>Race Control</b>"],
+                    fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
+        cells=dict(values=[rc0_lines],
+                   fill_color="#0f1720", font=dict(color="white", size=12),
+                   align="left", height=22)
+    )
+    fig.add_trace(rc_table, row=2, col=2)
 
-    # DRS zones & detection markers (STATIC overlays; added AFTER animated traces so no index shift)
+    # DRS zones & detection markers (static overlays)
     for (zs, ze, zd) in zones:
         fig.add_trace(go.Scatter(x=[xy_path[zd,0]], y=[xy_path[zd,1]], mode="markers",
                                  marker=dict(size=8, symbol="triangle-up", color="rgba(30,144,255,0.95)"),
@@ -620,12 +615,12 @@ def build_animation(
                      showgrid=False, zeroline=False, visible=False, row=1, col=1)
     fig.update_xaxes(showticklabels=False, row=1, col=2)
     fig.update_yaxes(showticklabels=False, row=1, col=2)
-    fig.update_xaxes(showticklabels=False, range=[0, 1], row=2, col=2)
-    fig.update_yaxes(showticklabels=False, range=[0, 1], row=2, col=2)
+    fig.update_xaxes(showticklabels=False, row=2, col=2)
+    fig.update_yaxes(showticklabels=False, row=2, col=2)
 
-    # Playback buttons (more top margin so they never clip)
+    # Playback buttons
     def _btn(speed: float, label: str):
-        frame_ms = max(10, int(1000 * DT / speed))
+        frame_ms = max(5, int(1000 * DT / speed))
         return dict(label=label, method="animate",
                     args=[None, {"fromcurrent": True,
                                  "frame": {"duration": frame_ms, "redraw": True},
@@ -639,7 +634,7 @@ def build_animation(
     banner_text, banner_bg = _flag_style(phase_flags[0] if len(phase_flags) else "GREEN")
     drs_tag = drs_banner[0] if len(drs_banner) else "DRS DISABLED"
     fig.update_layout(
-        height=860,
+        height=920,  # taller so leaderboard fits 20 rows comfortably
         margin=dict(l=16, r=16, t=140, b=20),
         legend=dict(title="Drivers", x=0.01, y=0.98, bgcolor="rgba(255,255,255,0.6)"),
         updatemenus=[dict(type="buttons", showactive=False, x=0.48, y=1.16, xanchor="center", buttons=buttons)],
@@ -656,8 +651,7 @@ def build_animation(
         paper_bgcolor="#f2f6fb"
     )
 
-    # Frames (trace order must match initial add_trace order for animated ones)
-    animated_prefix_count = 3 + D   # track(0), cars(1), sc(2), legends(3..2+D) -> then table, RC
+    # Frames
     frames = []
     for ti in range(T):
         order = orders[ti]
@@ -670,9 +664,8 @@ def build_animation(
         sc_marker = go.Scatter(x=[xy_path[0,0]], y=[xy_path[0,1]], mode="markers",
                                marker=dict(size=14, color="rgba(255,212,0,0.9)", symbol="square"),
                                showlegend=False, name="SC") if phase_flags[ti]=="SC" else go.Scatter()
+        rc_lines = rc_texts[ti]
 
-        # Only update the animated traces: track, cars, sc, (keep legend placeholders as empty),
-        # then table + race control.
         frame_data = [
             go.Scatter(x=xy_path[:,0], y=xy_path[:,1], line=dict(width=2, color=track_col)),
             go.Scatter(x=positions[ti,:,0], y=positions[ti,:,1],
@@ -680,13 +673,18 @@ def build_animation(
                        text=(labels if SHOW_MARKER_LABELS else None)),
             sc_marker,
         ] + [go.Scatter() for _ in range(D)] + [
-            go.Table(columnwidth=[0.20,0.40,0.40],
+            go.Table(columnwidth=[0.22,0.38,0.40],
                      header=dict(values=["<b>Position</b>","<b>Driver</b>","<b>Time</b>"],
                                  fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
                      cells=dict(values=[table_positions, table_drivers, table_gaps],
-                                fill_color="#0f1720", font=dict(color="white", size=12), align="left", height=24)),
-            go.Scatter(x=[0.02], y=[0.98], mode="text", text=[rc_texts[ti]],
-                       textposition="top left", textfont=dict(size=12)),
+                                fill_color="#0f1720", font=dict(color="white", size=12),
+                                align="left", height=22)),
+            go.Table(columnwidth=[1.0],
+                     header=dict(values=["<b>Race Control</b>"],
+                                 fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
+                     cells=dict(values=[rc_lines],
+                                fill_color="#0f1720", font=dict(color="white", size=12),
+                                align="left", height=22)),
         ]
 
         frames.append(go.Frame(
