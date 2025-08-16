@@ -27,7 +27,9 @@ We combine **within-team race pace** and **within-team qualifying pace**, then r
 2. **Clean** laps (remove pits, outliers, SC/VSC)  
 3. **Model race pace** using either:  
    - **Team-controlled regression** per event:  
-     `LapTimeSeconds ~ team + driver_within_team + compound + lap_on_tyre + lap_number`  
+     ```r
+     LapTimeSeconds ~ team + driver_within_team + compound + lap_on_tyre + lap_number
+     ```  
      → captures driver deltas relative to teammates, removing car advantage  
    - **Correction-factor model with team demeaning**  
 4. **Add quali metric** (best valid laps, teammate-normalized, session-adjusted)  
