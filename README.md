@@ -10,8 +10,8 @@ We combine **race pace** and **qualifying pace**, then run **Monte Carlo season 
 
 **Highlights:**
 - Focus on the **last 5 races** for recency & efficiency  
-- **Race pace**: clean laps only, no pits/yellows  
-- **Quali pace**: median of top flying laps  
+- **Race pace**: lap-time model adjusted for tyre compound, tyre age, and fuel load  
+- **Quali pace**: median of top flying laps on Softs (cleaned of track-limit deletions if available)  
 - **Monte Carlo**: thousands of simulated seasons with DNFs & randomness  
 - **Visuals**: animated race replay on Montreal with optional driver face PNGs  
 
@@ -20,16 +20,19 @@ We combine **race pace** and **qualifying pace**, then run **Monte Carlo season 
 ## Hypothesis
 > With equal cars, **Lance Stroll, Max Verstappen, or Lewis Hamilton** emerge as leading championship contenders.  
 
-
 ---
 
 ## Workflow
 1. **Load** last 5 races via FastF1  
-2. **Clean** laps (remove pits/outliers)  
-3. **Model pace deltas** (race + quali)  
-4. **Aggregate** performance across events  
-5. **Visualize** equal-car race animation  
-6. **Simulate** thousands of seasons (Drivers & Constructors)  
+2. **Clean** laps (remove pits, outliers, SC/VSC)  
+3. **Model race pace** using either:
+   - **OLS regression** per event:  
+     `LapTimeSeconds ~ driver + compound + lap_on_tyre + lap_number`  
+   - **Simple correction factors**: normalize each lap for compound offsets, tyre degradation, and fuel load  
+4. **Add quali metric** (median of top-k valid laps)  
+5. **Aggregate** performance across events with uncertainty weighting  
+6. **Visualize** equal-car race animation (Montreal)  
+7. **Simulate** thousands of seasons (Drivers & Constructors)  
 
 ---
 
@@ -37,3 +40,15 @@ We combine **race pace** and **qualifying pace**, then run **Monte Carlo season 
 - **Driver rankings** under equal cars  
 - **Interactive race replay** (Montreal track)  
 - **Championship forecasts**: driver win % and constructor standings  
+
+---
+
+## Limitations & Future Extensions
+- Current model **does not include** weather effects, pit strategy, or safety car randomness.  
+- Designed for **pace inference**, not exact race replication.  
+- Extensions that could be added later:
+  - Track-type adjustments (low vs high downforce)  
+  - Stochastic SC/VSC events  
+  - Pit window models and overtaking probability  
+  - Sprint weekends & penalty models  
+  - Bayesian shrinkage for small-sample drivers  
