@@ -45,7 +45,7 @@ viz_track:
   grand_prix: "Canada"           # Montreal (Circuit Gilles Villeneuve)
   session: "R"                   # any session is fine; code will fall back to fastest-lap XY if needed
 
-# === Optional: driver face images (by driver code) ===
+# === Will add later driver face images (by driver code) ===
 # face_images:
 #   VER: "faces/VER.png"
 #   PER: "faces/PER.png"
