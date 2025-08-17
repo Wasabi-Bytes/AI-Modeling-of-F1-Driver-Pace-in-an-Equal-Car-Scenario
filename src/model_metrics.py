@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Union
+from shrinkage_hier import hierarchical_shrink
 import warnings
 import math
 import logging
@@ -793,20 +794,38 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
     wQ = float(cfg.get("wQ", 0.4))
     merged = combine_event_metrics(race_out, quali_out, wR=wR, wQ=wQ, apply_bayes_shrinkage=False)
 
-    # Apply smarter EB shrinkage HERE (so we can pass cfg properly, including team RE)
+    # Apply shrinkage (EB by default; HB if toggled)
     if bool(cfg.get("apply_bayes_shrinkage", True)):
-        for (col_delta, col_se, out_col, w_col, tau_col) in [
-            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_tau2"),
-            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_tau2"),
-            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w", "event_tau2"),
+        use_hb = bool(cfg.get("use_hierarchical_shrinkage", False))
+        for (col_delta, col_se, out_col, w_col, extra_col) in [
+            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_post_sd"),
+            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_post_sd"),
+            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w", "event_post_sd"),
         ]:
             if col_delta in merged.columns and col_se in merged.columns:
-                shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
-                    merged[col_delta], merged[col_se], merged.get("team"), cfg
-                )
-                merged[out_col] = shrunk
-                merged[w_col] = w
-                merged[tau_col] = float(tau2)
+                if use_hb:
+                    shrunk, w, post_sd, meta_hb = hierarchical_shrink(
+                        merged[["driver", "team", col_delta, col_se]].rename(columns={
+                            col_delta: "delta", col_se: "se"
+                        }),
+                        delta_col="delta",
+                        se_col="se",
+                        team_col="team",
+                        driver_col="driver",
+                    )
+                    merged[out_col] = shrunk
+                    merged[w_col] = w
+                    merged[extra_col] = post_sd
+                    # (Optionally stash meta_hb['tau_team2'], meta_hb['tau_driver2'] if you want)
+                else:
+                    shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
+                        merged[col_delta], merged[col_se], merged.get("team"), cfg
+                    )
+                    merged[out_col] = shrunk
+                    merged[w_col] = w
+                    # Keep EB's hyperparameter for reference; no post_sd for EB
+                    tau_name = out_col.replace("_delta_s_shrunk", "") + "_tau2"
+                    merged[tau_name] = float(tau2)
 
     meta = {
         "year": event.get("year"),
