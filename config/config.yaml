@@ -14,6 +14,11 @@ race_spline_df_lap_num: 4
 race_spline_df_tyre_age_interact: 3
 race_use_compound_age_interaction: true
 
+# Optional feature toggles for README "expose all knobs"
+race_use_event_fe: true          # include C(event) in race models
+race_se_type: "cluster"          # "cluster" (driver_event) or "HC3"
+race_cluster_group: "driver_event"
+
 # === Reference points for normalization helpers ===
 tyre_ref_compound: "M"           # used by some helpers; safe to leave as-is
 tyre_ref_age: 3
@@ -26,6 +31,7 @@ quali_winsor_upper_q: 0.05       # light upper-tail trim of outliers
 quali_use_topk_after_norm: false # use all valid laps after normalization
 quali_top_k: 3                   # only used if quali_use_topk_after_norm: true
 quali_var_epsilon: 1e-6          # numeric guard for inverse-variance weights
+quali_evolution_adjust: true     # keep median-by-segment normalization
 
 # === Event-level blend (Race + Quali) ===
 wR: 0.6
@@ -40,12 +46,13 @@ weighting:
   race_sample_weight: 1.0          # weight per race lap contributing (race_n)
   quali_sample_weight: 1.0         # weight per quali segment contributing (quali_k)
 
-  shrinkage:
-    target: "field_mean"        # "field_mean" | "team_mean" | "zero"
-    include_team_re: true       # shrink team means toward field mean first
-    prior_var_mode: "moments"   # "moments" (method-of-moments) or "fixed"
-    prior_var_fixed: 0.0        # used iff prior_var_mode == "fixed" (seconds^2)
-    min_prior_var: 1e-6         # lower bound for tau^2
+# === Shrinkage (EB) ===
+shrinkage:
+  target: "field_mean"        # "field_mean" | "team_mean" | "zero"
+  include_team_re: true       # shrink team means toward field mean first
+  prior_var_mode: "moments"   # "moments" (method-of-moments) or "fixed"
+  prior_var_fixed: 0.0        # used iff prior_var_mode == "fixed" (seconds^2)
+  min_prior_var: 1e-6         # lower bound for tau^2
 
 # === Visualization track (for outline helper) ===
 viz_track:
@@ -61,6 +68,7 @@ visualize_equal_race:
   n_laps: 20                          # number of laps to simulate
   dt: 0.5                             # timestep (seconds) for animation/sim
   lap_jitter_sd: 0.12                 # lap-to-lap random noise (seconds)
+  random_seed: 42                     # seed for reproducibility
 
 # ===== Reliability model =====
 reliability:
