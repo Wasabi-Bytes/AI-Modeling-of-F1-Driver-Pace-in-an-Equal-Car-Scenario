@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Union
 import warnings
 import math
+import logging
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,9 @@ from sklearn.linear_model import Ridge
 # Local modules
 from load_data import load_config, load_all_data
 from clean_data import clean_event_payload  # uses your existing cleaner
+
+# Logging (quiet by default; respects your YAML logging.level elsewhere)
+logger = logging.getLogger(__name__)
 
 # Silence noisy future warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
@@ -61,6 +65,135 @@ def _se_from_residuals(resid: np.ndarray, n: int) -> float:
         return float("nan")
     sd = float(np.nanstd(resid, ddof=1)) if np.isfinite(resid).any() else float("nan")
     return sd / math.sqrt(max(n, 1))
+
+
+# ============================================================
+# =============== Track metadata (lazy load) =================
+# ============================================================
+_TRACK_META_CACHE: Optional[pd.DataFrame] = None
+
+def _load_track_meta(cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """
+    Read data/track_meta.csv if present and normalize columns:
+      event_key, track_type (lowercased), downforce_index [0,1], drs_zones, speed_bias, overtaking_difficulty
+    """
+    global _TRACK_META_CACHE
+    if _TRACK_META_CACHE is not None:
+        return _TRACK_META_CACHE
+
+    path = str(cfg.get("paths", {}).get("track_meta", "data/track_meta.csv"))
+    f = (_project_root() / path)
+    if not f.exists():
+        logger.info("[track_meta] No track_meta at %s; running without track controls.", f)
+        _TRACK_META_CACHE = None
+        return None
+
+    try:
+        tm = pd.read_csv(f)
+    except Exception as e:
+        logger.warning("[track_meta] Failed to read %s (%s); running without track controls.", f, e)
+        _TRACK_META_CACHE = None
+        return None
+
+    cols = {c.lower(): c for c in tm.columns}
+    # Expect event_key & at least one of track_type/downforce_index
+    if "event_key" not in cols:
+        # Try to infer: sometimes users name it "event" or similar
+        if "event" in cols:
+            tm.rename(columns={cols["event"]: "event_key"}, inplace=True)
+        else:
+            logger.warning("[track_meta] Missing 'event_key' column; running without track controls.")
+            _TRACK_META_CACHE = None
+            return None
+    else:
+        if cols["event_key"] != "event_key":
+            tm.rename(columns={cols["event_key"]: "event_key"}, inplace=True)
+
+    # Normalize expected columns if present
+    if "track_type" in cols and cols["track_type"] != "track_type":
+        tm.rename(columns={cols["track_type"]: "track_type"}, inplace=True)
+    if "downforce_index" in cols and cols["downforce_index"] != "downforce_index":
+        tm.rename(columns={cols["downforce_index"]: "downforce_index"}, inplace=True)
+
+    if "track_type" in tm.columns:
+        tm["track_type"] = tm["track_type"].astype(str).str.strip().str.lower()
+
+    if "downforce_index" in tm.columns:
+        tm["downforce_index"] = pd.to_numeric(tm["downforce_index"], errors="coerce").clip(lower=0.0, upper=1.0)
+
+    _TRACK_META_CACHE = tm
+    logger.info("[track_meta] Loaded %d rows from %s", len(tm), f)
+    return _TRACK_META_CACHE
+
+
+def _event_key(year: Any, gp: Any) -> str:
+    return f"{year} {gp}".strip()
+
+
+def _attach_event_track_tags(df: Optional[pd.DataFrame], event: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
+    """
+    If track_meta has a row for this event, attach constant columns:
+      track_type, downforce_index
+    Does nothing if metadata not found.
+    """
+    if df is None or len(df) == 0:
+        return df
+
+    tm = _load_track_meta(cfg)
+    if tm is None or tm.empty:
+        return df
+
+    key = _event_key(event.get("year"), event.get("gp"))
+    row = tm.loc[tm["event_key"].astype(str) == str(key)]
+    if row.empty:
+        logger.info("[track_meta] No metadata match for event_key='%s'", key)
+        return df
+
+    track_type = row.iloc[0]["track_type"] if "track_type" in row.columns else np.nan
+    downforce_index = row.iloc[0]["downforce_index"] if "downforce_index" in row.columns else np.nan
+
+    d2 = df.copy()
+    if "track_type" not in d2.columns:
+        d2["track_type"] = track_type
+    else:
+        d2["track_type"] = d2["track_type"].fillna(track_type)
+
+    if "downforce_index" not in d2.columns:
+        d2["downforce_index"] = downforce_index
+    else:
+        d2["downforce_index"] = pd.to_numeric(d2["downforce_index"], errors="coerce").fillna(downforce_index)
+
+    return d2
+
+
+def _append_track_controls_to_formula(base_formula: str, d: pd.DataFrame, cfg: Dict[str, Any]) -> str:
+    """
+    Optionally extend the model formula with track controls:
+      - archetype: + C(track_type)
+      - continuous: + bs(downforce_index, df=3)
+    Only if cfg['track_effects']['use'] is True and the needed column exists with at least some non-null data.
+    """
+    te = cfg.get("track_effects", {}) or {}
+    if not bool(te.get("use", False)):
+        return base_formula
+
+    mode = str(te.get("mode", "archetype")).lower()
+    f = base_formula
+    if mode == "archetype":
+        if "track_type" in d.columns and d["track_type"].notna().any():
+            f += " + C(track_type)"
+            logger.info("[track_effects] Enabled archetype FE (C(track_type))")
+        else:
+            logger.info("[track_effects] track_type not present; skipping archetype FE")
+    elif mode == "continuous":
+        if "downforce_index" in d.columns and d["downforce_index"].notna().any():
+            f += " + bs(downforce_index, df=3)"
+            logger.info("[track_effects] Enabled continuous control (bs(downforce_index, df=3))")
+        else:
+            logger.info("[track_effects] downforce_index not present; skipping continuous control")
+    else:
+        logger.info("[track_effects] Unknown mode '%s'; skipping", mode)
+    return f
 
 
 # ============================================================
@@ -294,7 +427,7 @@ def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
 
 def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Robust correction model with event fixed effects + spline controls.
+    Robust correction model with event fixed effects + spline controls (+ optional track controls).
     """
     d = _prep_race_columns(race_df)
     if d.empty:
@@ -312,7 +445,10 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     if use_age_interact:
         base += f" + C(compound):bs(lap_on_tyre, df={df_age_int})"
 
-    m = smf.ols(base, data=d).fit(cov_type="HC3")
+    # Optional track controls
+    formula = _append_track_controls_to_formula(base, d, cfg)
+
+    m = smf.ols(formula, data=d).fit(cov_type="HC3")
 
     d["pred"] = m.predict(d)
     intercept = float(m.params.get("Intercept", 0.0))
@@ -333,13 +469,13 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     out = mean_demeaned.reset_index()
     out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
     out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
-    out["race_model"] = "corrections_team(fe+spline)"
+    out["race_model"] = "corrections_team(fe+spline" + (",track" if " + " in formula and formula != base else "") + ")"
     return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
 def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Driver-within-team OLS with event FE + non-linear controls and cluster-robust SEs.
+    Driver-within-team OLS with event FE + non-linear controls and cluster-robust SEs (+ optional track controls).
     """
     d = _prep_race_columns(race_df)
     if d.empty:
@@ -351,11 +487,14 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     d = d.copy()
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    formula = (
+    base = (
         f"lap_time_s ~ C(event) + C(team) + C(driver_team)"
         + f" + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
         + " + C(compound)"
     )
+
+    # Optional track controls
+    formula = _append_track_controls_to_formula(base, d, cfg)
 
     d["cluster_id"] = d["driver_event"].astype(str)
     m = smf.ols(formula, data=d).fit(
@@ -383,7 +522,7 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     out = mean_demeaned.reset_index()
     out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
     out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
-    out["race_model"] = "ols_team(fe+spline,clustered)"
+    out["race_model"] = "ols_team(fe+spline,clustered" + (",track" if " + " in formula and formula != base else "") + ")"
     return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
@@ -405,6 +544,7 @@ def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series
 def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
     Evolution-aware quali metric (normalize within Q1/Q2/Q3, precision-weight per segment).
+    Track effects are NOT used here (normalization already handles session evolution); we may carry tags only.
     """
     out_cols = ["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
 
@@ -604,6 +744,11 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
     """
     dR_clean, r_summary, dQ_clean, q_summary = _unpack_clean_payload(clean_event_payload(event, cfg))
 
+    # Attach track tags (no-op if metadata missing)
+    dR_clean = _attach_event_track_tags(dR_clean, event, cfg)
+    if dQ_clean is not None:
+        dQ_clean = _attach_event_track_tags(dQ_clean, event, cfg)
+
     model_choice = str(cfg.get("race_model", "ols_team")).lower()
     if model_choice in ("ols_team", "ridge_team"):
         race_out = race_metrics_ols_team(dR_clean, cfg)
@@ -699,6 +844,8 @@ def main():
 
     all_rows = []
     for ev in events:
+        # Ensure track tags are attached before modeling
+        ev = dict(ev)  # shallow copy just in case
         res = compute_event_metrics(ev, cfg)
         save_event_metrics(res, outdir)
 
