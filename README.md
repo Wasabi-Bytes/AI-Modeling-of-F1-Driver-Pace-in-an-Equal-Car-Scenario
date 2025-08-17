@@ -2,7 +2,6 @@
 
 **What if every F1 driver raced in the same car?**  
 This project estimates their **true pace** by stripping away constructor advantage.  
-We model driver performance relative to teammates, aggregate across races, and simulate equal-car outcomes.
 
 ---
 
