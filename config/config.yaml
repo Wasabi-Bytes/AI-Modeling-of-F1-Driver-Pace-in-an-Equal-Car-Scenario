@@ -38,7 +38,7 @@ wR: 0.6
 wQ: 0.4
 apply_bayes_shrinkage: true
 
-# === Weighting controls ===
+# === Weighting controls (legacy; still supported) ===
 weighting:
   recency_mode: "date_half_life"   # "date_half_life" or "event_index"
   event_recency_decay: 0.92        # used if recency_mode == "event_index"
@@ -46,7 +46,7 @@ weighting:
   race_sample_weight: 1.0          # weight per race lap contributing (race_n)
   quali_sample_weight: 1.0         # weight per quali segment contributing (quali_k)
 
-# === Shrinkage (EB) ===
+# === Shrinkage (Empirical Bayes baseline) ===
 shrinkage:
   target: "field_mean"        # "field_mean" | "team_mean" | "zero"
   include_team_re: true       # shrink team means toward field mean first
@@ -80,6 +80,13 @@ reliability:
 
 # ===== Tyre degradation (compound- & track-type aware) =====
 degradation:
+  # Source selector + optional global scale (NEW)
+  source: "linear"    # "linear" (current) | "calibrated"
+  compound_scale:     # optional global scale factors (no effect at 1.0)
+    S: 1.0
+    M: 1.0
+    H: 1.0
+
   # Optional: sample compounds per driver by mix; else use default_compound
   compound_mix:
     S: 0.25
@@ -126,3 +133,55 @@ overtaking:
 starts:
   start_gain_sd: 0.08           # random start gain/loss in seconds (small)
   start_gain_rank_bias: 0.03    # >0 lets mid/back gain a touch on average; 0 for neutral
+
+# ===== Hierarchical shrinkage (off by default; keep EB as-is) =====
+use_hierarchical_shrinkage: false
+
+# ===== Driver "personality" (off by default) =====
+personality:
+  use: false
+  agg_weight: 1.0   # aggression weight in pass attempt rate
+  def_weight: 1.0   # defence weight in hold probability
+  risk_weight: 1.0  # risk weight in incident/DNF hazard
+
+# ===== Track effects & downforce controls (off by default) =====
+track_effects:
+  use: false
+  mode: "archetype"   # "archetype" | "continuous"
+
+downforce_profile:
+  use: false          # if true, allow downforce_index to enter models/sim
+
+# ===== Aggregation knobs (new; mirrors 'weighting' but date-aware by default) =====
+aggregation:
+  half_life_days: 120
+  per_event_decay: 0.92
+  use_date_decay: true   # if true, use half-life; if false, use per_event_decay
+
+# ===== Event-delta usage in sim =====
+event_deltas:
+  use_event_specific: false  # prefer per-event deltas over global/archetype aggregates
+
+# ===== Reproducibility & diversity =====
+rng:
+  seed: 2025
+  per_event_stream: true     # derive independent RNG streams per event
+  per_run_stream: true       # derive independent RNG streams per MC run
+
+simulation:
+  runs: 5000
+  entropy_guard:
+    min_unique_orders: 0.60  # flag if too many identical finish orders
+
+# ===== Paths to calibration artifacts =====
+paths:
+  degradation_params: "outputs/calibration/degradation_params.json"
+  overtake_params: "outputs/calibration/overtake_params.json"
+  track_meta: "data/track_meta.csv"
+  personality: "outputs/calibration/personality.csv"
+
+# ===== Logging & diagnostics =====
+logging:
+  level: "INFO"
+  write_run_log: true
+  diagnostics_dir: "outputs/diagnostics"
