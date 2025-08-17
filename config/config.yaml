@@ -1,8 +1,11 @@
 # === Core paths ===
-cache_dir: "data/cache"
+cache_dir: "fastf1_cache"
 
 # === Data to load ===
 include_qualifying: true
+season:
+  year: 2025
+  include_sprint: true   # controls which weekends to enumerate; we still load Q+R
 
 # === Race model (choose: "ols_team", "ridge_team", "corrections_team") ===
 race_model: "ols_team"
@@ -50,8 +53,8 @@ weighting:
 shrinkage:
   target: "field_mean"        # "field_mean" | "team_mean" | "zero"
   include_team_re: true       # shrink team means toward field mean first
-  prior_var_mode: "moments"   # "moments" (method-of-moments) or "fixed"
-  prior_var_fixed: 0.0        # used iff prior_var_mode == "fixed" (seconds^2)
+  prior_var_mode: "fixed"     # "moments" (data-derived) or "fixed" (constant)
+  prior_var_fixed: 0.05       # seconds^2; try 0.03–0.07 to adjust strength
   min_prior_var: 1e-6         # lower bound for tau^2
 
 # === Visualization track (for outline helper) ===
@@ -62,63 +65,53 @@ viz_track:
 
 # ===== Equal-car visualization (optional overrides) =====
 visualize_equal_race:
-  use_event_specific_deltas: true     # use that event’s delta_event if available
-  target_gp_substr: "canadian"        # which event file to pull (case-insensitive substring)
-  base_lap_sec: 90.0                  # baseline lap time for the sim (seconds)
-  n_laps: 20                          # number of laps to simulate
-  dt: 0.5                             # timestep (seconds) for animation/sim
-  lap_jitter_sd: 0.12                 # lap-to-lap random noise (seconds)
-  random_seed: 42                     # seed for reproducibility
+  use_event_specific_deltas: true
+  target_gp_substr: "canadian"
+  base_lap_sec: 90.0
+  n_laps: 20
+  dt: 0.5
+  lap_jitter_sd: 0.12
+  random_seed: 42
 
 # ===== Reliability model =====
 reliability:
-  mode: "per_race"            # "per_race" (recommended) or "per_lap"
-  per_race_dnf: 0.10          # ~10% chance a car DNFs over a typical race
-  typical_race_laps: 70       # used to derive per-lap hazard
-  # If mode == "per_lap", set:
-  # per_lap: 0.0015
+  mode: "per_race"
+  per_race_dnf: 0.10
+  typical_race_laps: 70
+  # per_lap: 0.0015  # only if mode == "per_lap"
 
-# ===== Tyre degradation (compound- & track-type aware) =====
+# ===== Tyre degradation =====
 degradation:
-  # Source selector + optional global scale (NEW)
-  source: "linear"    # "linear" (current) | "calibrated"
-  compound_scale:     # optional global scale factors (no effect at 1.0)
+  source: "linear"
+  compound_scale:
     S: 1.0
     M: 1.0
     H: 1.0
-
-  # Optional: sample compounds per driver by mix; else use default_compound
   compound_mix:
     S: 0.25
     M: 0.50
     H: 0.25
   default_compound: "M"
-
-  # Piecewise slopes in seconds per lap and a switch lap
   compounds:
     S: { early_slope: 0.035, late_slope: 0.010, switch_lap: 10 }
     M: { early_slope: 0.020, late_slope: 0.012, switch_lap: 14 }
     H: { early_slope: 0.010, late_slope: 0.015, switch_lap: 18 }
-
-  # Track-type multipliers (heuristic: street vs permanent)
   track_type_multipliers:
     street: 1.15
     permanent: 1.00
     high_deg: 1.25
     low_deg: 0.90
 
-# ===== Overtaking (logistic) =====
+# ===== Overtaking =====
 overtaking:
-  alpha_pace: 6.0                 # effect of normalized pace gap
-  beta_drs: 1.5                   # DRS bonus
-  gamma_defend: 1.2               # penalty if leader defended earlier
-  dirty_air_penalty: 0.15         # baseline difficulty to pass
-  drs_detect_thresh_s: 1.0        # DRS detection gap (seconds)
-  detection_offset_fraction: 0.03 # detection point upstream of zone start (fraction of lap)
-  drs_min_enable_lap: 3           # DRS available after this leader lap (F1-style)
-  drs_cooldown_after_sc_laps: 2   # delay after SC in-lap before re-enabling DRS
-
-  # Track-specific overrides by GP substring (case-insensitive)
+  alpha_pace: 6.0
+  beta_drs: 1.5
+  gamma_defend: 1.2
+  dirty_air_penalty: 0.15
+  drs_detect_thresh_s: 1.0
+  detection_offset_fraction: 0.03
+  drs_min_enable_lap: 3
+  drs_cooldown_after_sc_laps: 2
   track_overrides:
     monaco:
       dirty_air_penalty: 0.35
@@ -129,49 +122,49 @@ overtaking:
       drs_detect_thresh_s: 1.2
       alpha_pace: 7.5
 
-# ===== Starts (T1 variability) =====
+# ===== Starts =====
 starts:
-  start_gain_sd: 0.08           # random start gain/loss in seconds (small)
-  start_gain_rank_bias: 0.03    # >0 lets mid/back gain a touch on average; 0 for neutral
+  start_gain_sd: 0.08
+  start_gain_rank_bias: 0.03
 
-# ===== Hierarchical shrinkage (off by default; keep EB as-is) =====
+# ===== Hierarchical shrinkage =====
 use_hierarchical_shrinkage: false
 
-# ===== Driver "personality" (off by default) =====
+# ===== Driver personality =====
 personality:
   use: false
-  agg_weight: 1.0   # aggression weight in pass attempt rate
-  def_weight: 1.0   # defence weight in hold probability
-  risk_weight: 1.0  # risk weight in incident/DNF hazard
+  agg_weight: 1.0
+  def_weight: 1.0
+  risk_weight: 1.0
 
-# ===== Track effects & downforce controls (off by default) =====
+# ===== Track effects & downforce =====
 track_effects:
   use: true
-  mode: "archetype"   # "archetype" | "continuous"
+  mode: "archetype"
 
 downforce_profile:
-  use: false          # if true, allow downforce_index to enter models/sim
+  use: false
 
-# ===== Aggregation knobs (new; mirrors 'weighting' but date-aware by default) =====
+# ===== Aggregation knobs =====
 aggregation:
   half_life_days: 120
   per_event_decay: 0.92
-  use_date_decay: true   # if true, use half-life; if false, use per_event_decay
+  use_date_decay: true
 
-# ===== Event-delta usage in sim =====
+# ===== Event-delta usage =====
 event_deltas:
-  use_event_specific: false  # prefer per-event deltas over global/archetype aggregates
+  use_event_specific: false
 
 # ===== Reproducibility & diversity =====
 rng:
   seed: 2025
-  per_event_stream: true     # derive independent RNG streams per event
-  per_run_stream: true       # derive independent RNG streams per MC run
+  per_event_stream: true
+  per_run_stream: true
 
 simulation:
   runs: 5000
   entropy_guard:
-    min_unique_orders: 0.60  # flag if too many identical finish orders
+    min_unique_orders: 0.60
 
 # ===== Paths to calibration artifacts =====
 paths:
