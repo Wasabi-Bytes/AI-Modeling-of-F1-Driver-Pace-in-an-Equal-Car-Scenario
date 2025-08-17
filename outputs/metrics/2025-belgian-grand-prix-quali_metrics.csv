@@ -1,21 +1,21 @@
 driver,team,quali_delta_s,quali_se_s,quali_k
 ALB,Williams,0.0,,1
-STR,Aston Martin,0.0,,1
-SAI,Williams,0.0,,1
 RUS,Mercedes,0.0,,1
-PIA,McLaren,0.0,,1
 OCO,Haas F1 Team,0.0,,1
 NOR,McLaren,0.0,,1
 LEC,Ferrari,0.0,,1
-LAW,Racing Bulls,0.0,,1
-HUL,Kick Sauber,0.0,,1
-HAM,Ferrari,0.0,,1
 HAD,Racing Bulls,0.0,,1
-GAS,Alpine,0.0,,1
-COL,Alpine,0.0,,1
-BOR,Kick Sauber,0.0,,1
-BEA,Haas F1 Team,0.0,,1
-ANT,Mercedes,0.0,,1
-ALO,Aston Martin,0.0,,1
-TSU,Red Bull Racing,0.0,,1
 VER,Red Bull Racing,0.0,,1
+BOR,Kick Sauber,0.0,,1
+ALO,Aston Martin,0.0,,1
+GAS,Alpine,0.0,,1
+LAW,Racing Bulls,0.015999999999991132,,1
+PIA,McLaren,0.06400000000000716,,1
+BEA,Haas F1 Team,0.09199999999999875,,1
+STR,Aston Martin,0.11699999999999022,,1
+TSU,Red Bull Racing,0.34199999999999875,,1
+HUL,Kick Sauber,0.3709999999999951,,1
+COL,Alpine,0.38900000000001,,1
+SAI,Williams,0.4900000000000091,,1
+HAM,Ferrari,0.7639999999999958,,1
+ANT,Mercedes,0.8849999999999909,,1

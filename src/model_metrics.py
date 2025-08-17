@@ -9,8 +9,12 @@ import math
 import numpy as np
 import pandas as pd
 
-from sklearn.linear_model import LinearRegression, Ridge
-from sklearn.preprocessing import OneHotEncoder
+# Statsmodels for FE/splines + robust SEs
+import statsmodels.formula.api as smf
+from patsy import bs
+
+# (Keep sklearn around for potential future ridge; not used for OLS inference now)
+from sklearn.linear_model import Ridge
 
 # Local modules
 from load_data import load_config, load_all_data
@@ -18,7 +22,7 @@ from clean_data import clean_event_payload  # uses your existing cleaner
 
 # Silence noisy future warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
-warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn.*")
+warnings.filterwarnings("ignore", category=FutureWarning, module="statsmodels.*")
 
 
 # ---------- Paths ----------
@@ -59,14 +63,6 @@ def _se_from_residuals(resid: np.ndarray, n: int) -> float:
     return sd / math.sqrt(max(n, 1))
 
 
-def _ohe(sparse_ok: bool = False) -> OneHotEncoder:
-    # Compat: scikit-learn <1.4 uses `sparse`, >=1.4 prefers `sparse_output`
-    try:
-        return OneHotEncoder(handle_unknown="ignore", sparse_output=sparse_ok)
-    except TypeError:
-        return OneHotEncoder(handle_unknown="ignore", sparse=sparse_ok)
-
-
 def _empirical_bayes_shrinkage(delta: pd.Series, se: pd.Series) -> Tuple[pd.Series, pd.Series]:
     """
     Simple EB shrinkage toward 0 (global mean). Estimates tau^2 via method-of-moments:
@@ -95,6 +91,7 @@ _TEAM_COL_CANDIDATES = [
 ]
 _DRIVER_COL_CANDIDATES = ["driver", "Driver", "DriverNumber", "DriverId", "DriverRef"]
 _SESSION_COL_CANDIDATES = ["session", "Session", "phase", "Phase", "q_session"]
+_EVENT_COL_CANDIDATES = ["Event", "EventName", "GrandPrix", "GP", "gp"]
 
 def _ensure_driver_column(d: pd.DataFrame) -> pd.DataFrame:
     if "driver" in d.columns:
@@ -115,13 +112,7 @@ def _ensure_team_column(d: pd.DataFrame) -> pd.DataFrame:
         if c in d.columns:
             d["team"] = d[c].astype(str)
             return d
-    # last resort: if no column exists, attempt to infer a single team per driver (mode of any available hint)
-    if "TeamColor" in d.columns:
-        tmp = d.groupby("driver")["TeamColor"].agg(lambda s: s.mode().iloc[0] if len(s.mode()) else "UNK")
-        d = d.merge(tmp.rename("team"), left_on="driver", right_index=True, how="left")
-        d["team"] = d["team"].fillna("UNK").astype(str)
-        return d
-    raise ValueError("[race/quali] No team column found; please add one in clean_data.py or provide a standard team field.")
+    raise ValueError("[race/quali] No team column found; please ensure a standard team field is present.")
 
 def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
     if "session" in d.columns:
@@ -131,8 +122,22 @@ def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
         if c in d.columns:
             d["session"] = d[c].astype(str)
             return d
-    # default single-session if not provided
     d["session"] = "Q"
+    return d
+
+def _ensure_event_column(d: pd.DataFrame) -> pd.DataFrame:
+    if "event" in d.columns:
+        d["event"] = d["event"].astype(str)
+        return d
+    for c in _EVENT_COL_CANDIDATES:
+        if c in d.columns:
+            d["event"] = d[c].astype(str)
+            return d
+    # Fallback to year+gp if present
+    if {"year","gp"}.issubset(d.columns):
+        d["event"] = (d["year"].astype(str) + " " + d["gp"].astype(str)).astype(str)
+    else:
+        d["event"] = "UNKNOWN_EVENT"
     return d
 
 
@@ -142,8 +147,14 @@ def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
 
 def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
+
+    # Only consume "pace" laps if lap_ok is available
+    if "lap_ok" in d.columns:
+        d = d[d["lap_ok"].astype(bool)].copy()
+
     d = _ensure_driver_column(d)
     d = _ensure_team_column(d)
+    d = _ensure_event_column(d)
 
     needed_cols = ["LapTimeSeconds", "driver", "team", "compound", "lap_on_tyre", "lap_number"]
     for c in needed_cols:
@@ -154,59 +165,65 @@ def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
     d["lap_on_tyre"] = pd.to_numeric(d["lap_on_tyre"], errors="coerce")
     d["lap_number"] = pd.to_numeric(d["lap_number"], errors="coerce")
     d["LapTimeSeconds"] = pd.to_numeric(d["LapTimeSeconds"], errors="coerce")
-    d = d.replace([np.inf, -np.inf], np.nan).dropna(subset=["LapTimeSeconds", "driver", "team", "compound", "lap_on_tyre", "lap_number"])
+
+    # Trim obvious outliers (heavy tails) by stint: > Q3 + 3*IQR within driver×stint
+    if "stint_id" in d.columns:
+        grp = d.groupby(["driver", "stint_id"])
+    else:
+        grp = d.groupby(["driver"])  # fallback if stint missing
+    q1 = grp["LapTimeSeconds"].transform("quantile", 0.25)
+    q3 = grp["LapTimeSeconds"].transform("quantile", 0.75)
+    iqr = (q3 - q1).replace(0, np.nan)
+    keep = (d["LapTimeSeconds"] <= (q3 + 3 * iqr).fillna(q3 + 10.0))  # generous cap if IQR=0
+    d = d.loc[keep].copy()
+
+    d = d.replace([np.inf, -np.inf], np.nan).dropna(subset=["LapTimeSeconds", "driver", "team", "compound", "lap_on_tyre", "lap_number", "event"])
+    # Normalized helper columns
+    d["driver_team"] = d["driver"].astype(str) + "@" + d["team"].astype(str)
+    d["driver_event"] = d["driver"].astype(str) + "-" + d["event"].astype(str)
     return d
 
 
 def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Tyre/fuel/age corrections, followed by team demeaning (removes car layer).
-    Produces per-driver, per-event race deltas (lower = faster).
+    Robust correction model with event fixed effects + spline controls.
+    Steps:
+      1) Fit: lap_time_s ~ C(event) + C(compound)
+               + bs(lap_on_tyre, df=DF_AGE) + bs(lap_number, df=DF_LAP)
+               + [optional: C(compound):bs(lap_on_tyre, df=DF_AGE_INT)]
+      2) Normalize laps: subtract predicted controls (keep intercept & event FE baseline)
+      3) Team-demean normalized times → driver deltas
+      4) SE per driver from residual spread (HC3 fit for robustness)
     """
     d = _prep_race_columns(race_df)
     if d.empty:
         return pd.DataFrame(columns=["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"])
 
-    tyre_ref, L_mid = _get_ref_values(cfg, d)
-    ref_age = float(cfg.get("tyre_ref_age", 3.0))
+    # Configurable spline degrees (defaults are sensible)
+    df_age = int(cfg.get("race_spline_df_tyre_age", 4))
+    df_lap = int(cfg.get("race_spline_df_lap_num", 4))
+    df_age_int = int(cfg.get("race_spline_df_tyre_age_interact", 3))  # for compound × age interaction
+    use_age_interact = bool(cfg.get("race_use_compound_age_interaction", True))
 
-    # Learn correction factors: compound + linear age + centered lap_number
-    ohe = _ohe()
-    Xc = ohe.fit_transform(d[["compound"]])
-    Xn = np.column_stack([
-        d["lap_on_tyre"].to_numpy(),
-        (d["lap_number"].to_numpy() - L_mid),
-    ])
-    X = np.column_stack([Xc, Xn])
-    y = d["LapTimeSeconds"].to_numpy()
+    d = d.copy()
+    d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    lin = LinearRegression()
-    lin.fit(X, y)
+    # Build formula with optional interaction
+    base = "lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df=@df_age) + bs(lap_number, df=@df_lap)"
+    if use_age_interact:
+        base += " + C(compound):bs(lap_on_tyre, df=@df_age_int)"
 
-    beta = lin.coef_
-    n_comp = Xc.shape[1]
-    beta_comp = beta[:n_comp]
-    beta_age = beta[n_comp + 0]
-    beta_fuel = beta[n_comp + 1]
+    m = smf.ols(base, data=d).fit(cov_type="HC3")  # heteroskedasticity-robust
 
-    try:
-        Xc_ref = ohe.transform(pd.DataFrame({"compound": [tyre_ref]}))
-        if Xc_ref.shape[1] != Xc.shape[1]:
-            Xc_ref = np.zeros((1, Xc.shape[1]), dtype=float)
-    except Exception:
-        Xc_ref = np.zeros((1, Xc.shape[1]), dtype=float)
+    # Predicted control component
+    d["pred"] = m.predict(d)
 
-    comp_effect_actual = (Xc * beta_comp).sum(axis=1)
-    comp_effect_ref = float((Xc_ref * beta_comp).sum(axis=1))
-    age_effect_actual = beta_age * d["lap_on_tyre"].to_numpy()
-    age_effect_ref = beta_age * ref_age
-    fuel_effect_actual = beta_fuel * (d["lap_number"].to_numpy() - L_mid)
-    fuel_effect_ref = 0.0
+    # Normalize: remove predicted controls but keep intercept-like baseline
+    # (equivalent to using residuals + intercept)
+    intercept = float(m.params.get("Intercept", 0.0))
+    d["norm_time"] = d["lap_time_s"] - (d["pred"] - intercept)
 
-    correction = (comp_effect_actual - comp_effect_ref) + (age_effect_actual - age_effect_ref) + (fuel_effect_actual - fuel_effect_ref)
-    d["norm_time"] = d["LapTimeSeconds"].to_numpy() - correction
-
-    # Team demean
+    # Within-team demeaning
     d["team_mean"] = d.groupby("team", dropna=False)["norm_time"].transform("mean")
     d["demeaned"] = d["norm_time"] - d["team_mean"]
 
@@ -215,103 +232,100 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     mean_demeaned = grp["demeaned"].mean().rename("race_delta_s")
     n_by_driver = grp.size().rename("race_n")
 
-    se_by_driver = []
-    for (drv, tm), sub in grp:
-        resid = sub["demeaned"].to_numpy() - float(mean_demeaned.loc[(drv, tm)])
-        se_by_driver.append(_se_from_residuals(resid, int(n_by_driver.loc[(drv, tm)])))
+    # SE from per-driver residual spread
+    res = d["demeaned"] - d.groupby(["driver", "team"], dropna=False)["demeaned"].transform("mean")
+    se_by_driver = res.groupby([d["driver"], d["team"]]).std() / np.sqrt(
+        res.groupby([d["driver"], d["team"]]).count().clip(lower=1)
+    )
 
     out = mean_demeaned.reset_index()
-    out["race_se_s"] = se_by_driver
-    out["race_model"] = "corrections_team"
+    out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
+    out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
+    out["race_model"] = "corrections_team(fe+spline)"
     return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
 def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Team-controlled linear model:
-      LapTime ~ C(team) + C(driver_within_team) + controls
-    Coefficients for driver_within_team are within-team deltas.
+    Driver-within-team OLS with event FE + non-linear controls and cluster-robust SEs.
+    Model:
+      lap_time_s ~ C(event) + C(team) + C(driver_team)
+                   + bs(lap_on_tyre, df=DF_AGE) + bs(lap_number, df=DF_LAP) + C(compound)
+    Cluster-robust SEs (clusters = driver×event) help with stint autocorrelation.
+    Deltas are constructed from normalized laps (team-demeaned) rather than raw coefs.
     """
     d = _prep_race_columns(race_df)
     if d.empty:
         return pd.DataFrame(columns=["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"])
 
-    tyre_ref, L_mid = _get_ref_values(cfg, d)
-    ref_age = float(cfg.get("tyre_ref_age", 3.0))
+    df_age = int(cfg.get("race_spline_df_tyre_age", 4))
+    df_lap = int(cfg.get("race_spline_df_lap_num", 4))
 
-    # Build categorical features
-    d["drv_team"] = d["driver"].astype(str) + "@" + d["team"].astype(str)
+    d = d.copy()
+    d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    ohe_team = _ohe()
-    ohe_drvteam = _ohe()
-    X_team = ohe_team.fit_transform(d[["team"]])
-    X_drvteam = ohe_drvteam.fit_transform(d[["drv_team"]])
+    # Fit with event FE, team FE, driver@team FE, plus non-linear controls
+    formula = (
+        "lap_time_s ~ C(event) + C(team) + C(driver_team)"
+        + " + bs(lap_on_tyre, df=@df_age) + bs(lap_number, df=@df_lap)"
+        + " + C(compound)"
+    )
 
-    # Controls
-    X_num = np.column_stack([
-        pd.to_numeric(d["lap_on_tyre"], errors="coerce").to_numpy(),
-        (pd.to_numeric(d["lap_number"], errors="coerce").to_numpy() - L_mid),
-    ])
+    # Cluster id = driver×event for robust SEs
+    d["cluster_id"] = d["driver_event"].astype(str)
 
-    # Full design (team + driver-within-team + controls)
-    X = np.column_stack([X_team, X_drvteam, X_num])
-    y = d["LapTimeSeconds"].to_numpy()
+    m = smf.ols(formula, data=d).fit(
+        cov_type="cluster",
+        cov_kwds={"groups": d["cluster_id"]},
+        use_t=True
+    )
 
-    # Choose regressor (OLS or Ridge)
-    model_name = "ols_team"
-    reg = LinearRegression()
-    if str(cfg.get("race_model", "ols_team")).lower() == "ridge_team":
-        alpha = float(cfg.get("regularization_alpha", 1.0))
-        reg = Ridge(alpha=alpha, fit_intercept=True, random_state=42)
-        model_name = "ridge_team"
+    # Normalized laps using model prediction; keep intercept-like baseline
+    intercept = float(m.params.get("Intercept", 0.0))
+    d["pred"] = m.predict(d)
+    d["norm_time"] = d["lap_time_s"] - (d["pred"] - intercept)
 
-    reg.fit(X, y)
+    # Within-team means → deltas (lower = faster)
+    d["team_mean"] = d.groupby("team", dropna=False)["norm_time"].transform("mean")
+    d["demeaned"] = d["norm_time"] - d["team_mean"]
 
-    # Extract driver-within-team effects by predicting at reference controls
-    drvteam_values = sorted(d["drv_team"].unique())
-    X_drvteam_all = ohe_drvteam.transform(pd.DataFrame({"drv_team": drvteam_values}))
+    grp = d.groupby(["driver", "team"], dropna=False)
+    mean_demeaned = grp["demeaned"].mean().rename("race_delta_s")
+    n_by_driver = grp.size().rename("race_n")
 
-    # Null out team terms and use reference controls for numeric.
-    X_team_zero = np.zeros((X_drvteam_all.shape[0], X_team.shape[1]), dtype=float)
-    X_num_ref = np.column_stack([
-        np.full((X_drvteam_all.shape[0],), ref_age, dtype=float),
-        np.full((X_drvteam_all.shape[0],), 0.0, dtype=float),  # centered at L_mid
-    ])
+    # SE per driver from residual spread after normalization
+    res = d["demeaned"] - d.groupby(["driver", "team"], dropna=False)["demeaned"].transform("mean")
+    se_by_driver = res.groupby([d["driver"], d["team"]]).std() / np.sqrt(
+        res.groupby([d["driver"], d["team"]]).count().clip(lower=1)
+    )
 
-    X_ref = np.column_stack([X_team_zero, X_drvteam_all, X_num_ref])
-    preds = reg.predict(X_ref)
-
-    # Convert drv_team back to (driver, team)
-    df_preds = pd.DataFrame({"drv_team": drvteam_values, "pred_ref_s": preds})
-    df_preds[["driver", "team"]] = df_preds["drv_team"].str.split("@", n=1, expand=True)
-
-    # Within-team deltas
-    df_preds["team_best"] = df_preds.groupby("team")["pred_ref_s"].transform("min")
-    df_preds["race_delta_s"] = df_preds["pred_ref_s"] - df_preds["team_best"]
-
-    # SE per driver from residuals
-    resid_all = y - reg.predict(X)
-    n_by_drvteam = d.groupby(["driver", "team"], dropna=False).size()
-
-    se_list = []
-    for _, row in df_preds.iterrows():
-        mask = (d["driver"] == row["driver"]) & (d["team"] == row["team"])
-        se_list.append(_se_from_residuals(resid_all[mask.to_numpy()], int(n_by_drvteam.get((row["driver"], row["team"]), 0))))
-    df_preds["race_se_s"] = se_list
-    df_preds["race_n"] = [int(n_by_drvteam.get((r["driver"], r["team"]), 0)) for _, r in df_preds.iterrows()]
-    df_preds["race_model"] = model_name
-
-    return df_preds[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
+    out = mean_demeaned.reset_index()
+    out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
+    out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
+    out["race_model"] = "ols_team(fe+spline,clustered)"
+    return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
 # ============================================================
-# ================= QUALIFYING (WITHIN TEAM) =================
+# ================= QUALIFYING (CURRENT LOGIC) ===============
 # ============================================================
+
+def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
+    if "session" in d.columns:
+        d["session"] = d["session"].astype(str)
+        return d
+    for c in _SESSION_COL_CANDIDATES:
+        if c in d.columns:
+            d["session"] = d[c].astype(str)
+            return d
+    d["session"] = "Q"
+    return d
+
 
 def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Compute within-team quali gaps by sub-session (Q1/Q2/Q3),
-    using best valid lap per driver per sub-session.
+    Existing quali method (top-k per sub-session, within-team gap).
+    We'll modernize this in the next step when we tackle evolution-aware quali.
     """
     if quali_df is None or len(quali_df) == 0:
         return pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
@@ -464,7 +478,7 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
     elif model_choice in ("corrections_team", "corrections"):
         race_out = race_metrics_corrections_team(dR_clean, cfg)
     else:
-        # As a last resort, raw team-demeaned means
+        # Fallback: raw team-demeaned means on pace laps
         d_tmp = _prep_race_columns(dR_clean)
         d_tmp["team_mean"] = d_tmp.groupby("team")["LapTimeSeconds"].transform("mean")
         d_tmp["demeaned"] = d_tmp["LapTimeSeconds"] - d_tmp["team_mean"]
@@ -479,7 +493,7 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
                     lambda r: _se_from_residuals(
                         d_tmp.loc[(d_tmp["driver"] == r["driver"]) & (d_tmp["team"] == r["team"]), "demeaned"].to_numpy()
                         - float(mean_.loc[(r["driver"], r["team"])]),
-                        int(n_.loc[(r["driver"], r["team"])])
+                        int(n_.loc[(r["driver"], r["team"])]),
                     ),
                     axis=1,
                 ),
@@ -557,4 +571,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
