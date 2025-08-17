@@ -10,8 +10,8 @@ import fastf1
 import yaml
 import pandas as pd
 import logging
-logging.getLogger("fastf1").setLevel(logging.WARNING)
 
+logging.getLogger("fastf1").setLevel(logging.WARNING)
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="fastf1.*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
@@ -37,8 +37,9 @@ def enable_cache(cache_dir: str) -> None:
     fastf1.Cache.enable_cache(str(cache_dir_abs))
 
 
-# -------- Hardcoded last-5 events (as of 2025-08-16) --------
+# -------- Recent events (example list; override via config if needed) --------
 def get_recent_races(_: Dict[str, Any]) -> List[Dict[str, Any]]:
+    # Keep this as a simple example—pull from config if you want dynamic control
     return [
         {"year": 2025, "grand_prix": "Hungarian Grand Prix", "session": "R"},
         {"year": 2025, "grand_prix": "Belgian Grand Prix",   "session": "R"},
@@ -69,9 +70,23 @@ def _standardize_lap_seconds(df: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
-def _derive_race_tags(laps: pd.DataFrame) -> pd.DataFrame:
+def _is_green(track_status: pd.Series) -> pd.Series:
+    """
+    FastF1 TrackStatus: '1' means green conditions.
+    Some weekends show composite codes (e.g., '451'); we require a pure '1' for pace laps.
+    """
+    s = track_status.astype(str).fillna("")
+    return s == "1"
+
+
+def _derive_and_filter_tags(laps: pd.DataFrame, *, session_kind: str) -> pd.DataFrame:
+    """
+    Derive standardized tags and apply the strict pace-lap filter (lap_ok) immediately.
+    session_kind: 'R' or 'Q' (affects only logging text; logic identical).
+    """
     d = _standardize_lap_seconds(laps).reset_index(drop=True)
 
+    # --- Canonical driver/team/compound/event fields ---
     if "Driver" in d.columns:
         d["driver"] = d["Driver"].astype(str)
     elif "DriverNumber" in d.columns:
@@ -79,42 +94,83 @@ def _derive_race_tags(laps: pd.DataFrame) -> pd.DataFrame:
     else:
         d["driver"] = d.get("DriverNumber", d.get("Driver", "UNK")).astype(str)
 
+    if "Team" in d.columns:
+        d["Team"] = d["Team"].astype(str)
+    else:
+        d["Team"] = d.get("Team", "UNK").astype(str)
+
     d["compound"] = d.get("Compound", "UNKNOWN").fillna("UNKNOWN").astype(str)
 
-    if "Stint" in d.columns:
-        d["stint_id"] = pd.to_numeric(d["Stint"], errors="coerce").fillna(-1).astype(int)
-    else:
-        pit_flag = (
-            d.get("PitInTime").notna() | d.get("PitOutTime").notna()
-            if ("PitInTime" in d or "PitOutTime" in d) else pd.Series(False, index=d.index)
-        )
-        d = d.sort_values(["driver", "LapNumber"] if "LapNumber" in d.columns else ["driver"]).copy()
-        d["stint_id"] = pit_flag.groupby(d["driver"]).cumsum().astype(int)
+    # Event label if present (optional; used downstream for FEs)
+    ev_col = "Event" if "Event" in d.columns else ("EventName" if "EventName" in d.columns else None)
+    if ev_col:
+        d["Event"] = d[ev_col].astype(str)
 
+    # --- Ensure LapNumber exists and is integer ---
     if "LapNumber" not in d.columns:
+        d = d.sort_values(["driver", "LapTimeSeconds"]).copy()
         d["LapNumber"] = d.groupby("driver").cumcount() + 1
-    d = d.sort_values(["driver", "stint_id", "LapNumber"]).copy()
-    d["lap_on_tyre"] = d.groupby(["driver", "stint_id"]).cumcount() + 1
-
     d["lap_number"] = pd.to_numeric(d["LapNumber"], errors="coerce").fillna(0).astype(int)
 
-    if "TrackStatus" in d.columns:
-        d["track_status"] = d["TrackStatus"].astype(str)
-    else:
-        d["track_status"] = ""
+    # --- Track status & timing accuracy ---
+    d["track_status"] = d.get("TrackStatus", "").astype(str)
+    is_green = _is_green(d["track_status"])
+    is_accurate = d.get("IsAccurate", True)
+    if isinstance(is_accurate, (pd.Series,)):
+        is_accurate = is_accurate.fillna(True).astype(bool)
 
-    if "IsAccurate" in d.columns:
-        d["lap_ok"] = d["IsAccurate"].fillna(True).astype(bool)
-    elif "LapIsValid" in d.columns:
-        d["lap_ok"] = d["LapIsValid"].fillna(True).astype(bool)
-    else:
-        d["lap_ok"] = True
-
+    # --- Pit in/out flags to identify in/out laps ---
     for col in ("PitInTime", "PitOutTime"):
         if col not in d.columns:
             d[col] = pd.NaT
+    is_outlap = d["PitOutTime"].notna()
+    is_inlap = d["PitInTime"].notna()
 
-    d = d.sort_values(["driver", "LapNumber"]).reset_index(drop=True)
+    # --- Positive, valid lap time ---
+    has_time = d["LapTimeSeconds"].notna() & (d["LapTimeSeconds"] > 0)
+
+    # --- Strict pace-lap definition ---
+    d["lap_ok"] = has_time & is_accurate & (~is_outlap) & (~is_inlap) & is_green
+
+    # --- Stint inference (robust) ---
+    # Prefer provided Stint; otherwise start a new stint immediately after a pit OUT.
+    if "Stint" in d.columns:
+        stint = pd.to_numeric(d["Stint"], errors="coerce")
+        # If some stints are missing, still fall back on pit-based inference for those rows
+        missing = stint.isna()
+        if missing.any():
+            d = d.sort_values(["driver", "LapNumber"]).copy()
+            inferred = d["PitOutTime"].notna().groupby(d["driver"]).cumsum()
+            stint = stint.fillna(inferred)
+        d["stint_id"] = stint.fillna(-1).astype(int)
+    else:
+        d = d.sort_values(["driver", "LapNumber"]).copy()
+        d["stint_id"] = d["PitOutTime"].notna().groupby(d["driver"]).cumsum().astype(int)
+
+    # --- lap_on_tyre counter (1-based within driver×stint) ---
+    d = d.sort_values(["driver", "stint_id", "LapNumber"]).copy()
+    d["lap_on_tyre"] = d.groupby(["driver", "stint_id"]).cumcount() + 1
+
+    # --- Log drops for visibility, then FILTER immediately ---
+    before = len(d)
+    dropped = (~d["lap_ok"]).sum()
+    kept = d["lap_ok"].sum()
+    logging.info(
+        f"[load_data] {session_kind}: kept {kept}/{before} pace laps "
+        f"({dropped} dropped: non-green/in-out/inaccurate/invalid)."
+    )
+
+    d = d.loc[d["lap_ok"]].reset_index(drop=True)
+
+    # Ensure all expected columns exist post-filter
+    needed = [
+        "LapTimeSeconds", "driver", "Team", "compound",
+        "stint_id", "lap_on_tyre", "lap_number", "track_status", "lap_ok"
+    ]
+    for c in needed:
+        if c not in d.columns:
+            d[c] = np.nan if c != "lap_ok" else True
+
     return d
 
 
@@ -138,29 +194,35 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     for race in races:
         year, gp = race["year"], race["grand_prix"]
 
-        race_laps, _ = load_session(year, gp, "R")
-        if race_laps is None or len(race_laps) == 0:
+        # --- Race ---
+        race_laps_raw, _ = load_session(year, gp, "R")
+        if race_laps_raw is None or len(race_laps_raw) == 0:
             print(f"[WARN] No race laps for {year} {gp}")
             continue
-
-        race_laps_tagged = _derive_race_tags(race_laps)
+        race_laps = _derive_and_filter_tags(race_laps_raw, session_kind="R")
 
         entry: Dict[str, Any] = {
             "year": year,
             "gp": gp,
-            "race_laps": race_laps_tagged,
+            "race_laps": race_laps,
         }
 
+        # --- Quali (optional) ---
         if config.get("include_qualifying", True):
-            quali_laps, _ = load_session(year, gp, "Q")
-            entry["quali_laps"] = quali_laps
+            quali_laps_raw, _ = load_session(year, gp, "Q")
+            if quali_laps_raw is not None and len(quali_laps_raw) > 0:
+                # Quali benefits from the same strict filtering (pace laps only)
+                quali_laps = _derive_and_filter_tags(quali_laps_raw, session_kind="Q")
+                entry["quali_laps"] = quali_laps
+            else:
+                entry["quali_laps"] = None
 
         out.append(entry)
 
     return out
 
 
-# -------- Track Outline (Montreal preferred) --------
+# -------- Track Outline (fallbacks) --------
 def get_track_outline(config: Dict[str, Any]) -> Optional[pd.DataFrame]:
     track_cfg = config.get("viz_track", {})
     year = int(track_cfg.get("year"))
@@ -216,9 +278,12 @@ if __name__ == "__main__":
         first = data[0]
         print("[INFO] Example keys in first event:", list(first.keys()))
         cols = list(first["race_laps"].columns)
-        needed = ["LapTimeSeconds", "driver", "compound", "stint_id", "lap_on_tyre", "lap_number", "track_status", "lap_ok"]
+        needed = ["LapTimeSeconds", "driver", "compound", "stint_id", "lap_on_tyre",
+                  "lap_number", "track_status", "lap_ok"]
         print("[INFO] Tagged fields present:", {k: (k in cols) for k in needed})
-        print("[INFO] Last 15 race columns (peek):", cols[-15:])
+        print("[INFO] Race laps kept (pace-only):", len(first["race_laps"]))
+        if first.get("quali_laps") is not None:
+            print("[INFO] Quali laps kept (pace-only):", len(first["quali_laps"]))
 
     outline = get_track_outline(cfg)
     if outline is not None:
