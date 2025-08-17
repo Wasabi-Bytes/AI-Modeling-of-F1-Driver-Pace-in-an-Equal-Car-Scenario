@@ -1,56 +1,39 @@
 # === Core paths ===
-cache_dir: "data/cache"      # FastF1 cache directory (load_data.enable_cache uses this)
+cache_dir: "data/cache"
 
-# === Session selection ===
-# Note: your load_data.py currently hardcodes the last-5 events in code.
-# This flag still controls whether we ALSO load qualifying for each event.
+# === Data to load ===
 include_qualifying: true
 
-# === Race metric model (choose ONE) ===
-# - "ols": additive OLS per event: LapTimeSeconds ~ driver + compound + lap_on_tyre + lap_number
-# - "corrections": simple offsets/slopes (compound, age, fuel), then average normalized laps
-# - "raw": no adjustments (baseline)
-race_model: "ols"
+# === Race model (choose: "ols_team", "ridge_team", "corrections_team") ===
+race_model: "ols_team"
+regularization_alpha: 1.0        # used only if race_model == "ridge_team"
 
-# === Cleaning & filters ===
-lap_time_bounds: [60.0, 180.0]   # drop weird laps outside [lo, hi] seconds
-trim_percentiles: [5, 95]        # per-driver trimming on LapTimeSeconds
-exclude_vsc_sc: true             # drop laps under SC/VSC/RED when track_status is available
-qualifying_top_k: 3              # median-of-top-k valid quali laps
-qualifying_require_softs: true   # try to keep only Softs for quali if compound info is present
+# === Race model controls (splines & interactions) ===
+race_spline_df_tyre_age: 4
+race_spline_df_lap_num: 4
+race_spline_df_tyre_age_interact: 3
+race_use_compound_age_interaction: true
 
-# === Tyre/fuel normalization (used by OLS as features; by "corrections" as adjustments) ===
-tyre_ref_compound: "M"           # reference compound for offsets (M = Medium)
-tyre_ref_age: 3                  # normalize age to this lap_on_tyre
-include_age_slope: true          # if using "corrections", fit per-compound age slope
-fuel_normalization: "linear"     # "linear" or "off" (for "corrections" path)
-fuel_ref_lap: "median"           # normalize to median race lap (or set an int, e.g., 30)
+# === Reference points for normalization helpers ===
+tyre_ref_compound: "M"           # used by some helpers; safe to leave as-is
+tyre_ref_age: 3
+fuel_ref_lap: "median"
 
-# === Event-level combination (Race + Quali) ===
-wR: 0.6                          # race weight in per-event blend
-wQ: 0.4                          # quali weight in per-event blend
+# === Qualifying (evolution-aware) ===
+quali_winsorize: true
+quali_winsor_lower_q: 0.00       # no lower trim by default
+quali_winsor_upper_q: 0.05       # light upper-tail trim of outliers
+quali_use_topk_after_norm: false # use all valid laps after normalization
+quali_top_k: 3                   # only used if quali_use_topk_after_norm: true
+quali_var_epsilon: 1e-6          # numeric guard for inverse-variance weights
 
-# === Aggregation window & MC sim ===
-recent_events: 5                 # documentation only (selection is hardcoded in load_data.py)
-monte_carlo:
-  season_races: 24
-  monte_carlo_iters: 5000
-  dnf_rate: 0.04                 # 4% chance a driver is excluded in a given race
-  luck_sd: 0.05                  # extra pace noise (sec) to allow unordered results
-  random_seed: 42
+# === Event-level blend (Race + Quali) ===
+wR: 0.6
+wQ: 0.4
+apply_bayes_shrinkage: true
 
-# === Visualization track for the animation ===
+# === Visualization track (for outline helper) ===
 viz_track:
   year: 2025
-  grand_prix: "Canada"           # Montreal (Circuit Gilles Villeneuve)
-  session: "R"                   # any session is fine; code will fall back to fastest-lap XY if needed
-
-# === Will add later driver face images (by driver code) ===
-# face_images:
-#   VER: "faces/VER.png"
-#   PER: "faces/PER.png"
-#   LEC: "faces/LEC.png"
-#   # ...
-
-# === Output options (for downstream scripts; not used by load_data.py) ===
-outputs_dir: "outputs"
+  grand_prix: "Canada"
+  session: "R"
