@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -43,7 +44,6 @@ DRS_MIN_ENABLE_LAP = 3
 DETECTION_OFFSET_FRACTION = 0.03
 
 # --- Calibrated degradation params loader & curve helper ---
-import json  # (ensure json is imported at top)
 
 def _load_degradation_params(cfg: dict) -> Optional[dict]:
     path = _cfg_get(cfg, ["paths", "degradation_params"], None)
@@ -193,6 +193,47 @@ TEAM_COLORS = {
     "Williams": "#005AFF", "RB": "#2B4562", "Sauber": "#006F3C",
     "Haas": "#B6BABD", "UNKNOWN": "#888888",
 }
+
+# === Personality loader (ADD) ===
+def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[str, float]]:
+    """
+    Read outputs/calibration/personality.csv (or cfg.paths.personality) and
+    return {driver: {aggression, defence, risk, *_se}} with safe fallbacks.
+    """
+    path = _cfg_get(cfg, ["paths", "personality"], "outputs/calibration/personality.csv")
+    f = (PROJ / path).resolve()
+    if not f.exists():
+        return {}
+
+    try:
+        df = pd.read_csv(f)
+    except Exception:
+        return {}
+
+    low = {c.lower(): c for c in df.columns}
+    req = ["driver", "aggression", "defence", "risk"]
+    if not all(k in low for k in req):
+        return {}
+
+    # normalize to [0,1] & clamp; missing -> 0.5
+    def _clamp01(s):
+        return pd.to_numeric(s, errors="coerce").clip(0.0, 1.0)
+
+    out = {}
+    for _, r in df.iterrows():
+        d = str(r[low["driver"]])
+        out[d] = {
+            "aggression": float(_clamp01(r[low["aggression"]])) if pd.notna(r[low["aggression"]]) else 0.5,
+            "defence":   float(_clamp01(r[low["defence"]]))   if pd.notna(r[low["defence"]])   else 0.5,
+            "risk":      float(_clamp01(r[low["risk"]]))      if pd.notna(r[low["risk"]])      else 0.5,
+            "aggression_se": float(pd.to_numeric(r.get(low.get("aggression_se",""), np.nan), errors="coerce")) if "aggression_se" in low else np.nan,
+            "defence_se":   float(pd.to_numeric(r.get(low.get("defence_se",""),   np.nan), errors="coerce")) if "defence_se" in low else np.nan,
+            "risk_se":      float(pd.to_numeric(r.get(low.get("risk_se",""),      np.nan), errors="coerce")) if "risk_se" in low else np.nan,
+        }
+    # ensure all current drivers are present
+    for d in drivers:
+        out.setdefault(d, {"aggression":0.5,"defence":0.5,"risk":0.5,"aggression_se":np.nan,"defence_se":np.nan,"risk_se":np.nan})
+    return out
 
 # ------------------- Driver mapping helpers -------------------
 def _infer_driver_cols(df: pd.DataFrame) -> str:
@@ -347,16 +388,33 @@ def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[st
     return colors
 
 # ------------------- Reliability (per-lap from per-race target) -------------------
-def per_lap_dnf_probability(cfg: dict, n_laps: int) -> float:
+def per_lap_dnf_probability(cfg: dict, n_laps: int, risk_vec: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    Returns per-driver per-lap DNF probabilities.
+    - If risk_vec is None or personality.use == False -> scalar broadcast (reliability mode).
+    - If risk_vec provided -> scale per-race DNF by risk in [0,1]:
+        p_race_driver = base * (1 + risk_weight*(risk - 0.5))  -> in [0.5*base, 1.5*base] at weight=1
+    """
     mode = _cfg_get(cfg, ["reliability", "mode"], RELIABILITY_MODE)
-    if str(mode).lower() == "per_lap":
-        return float(_cfg_get(cfg, ["reliability", "per_lap"], RELIABILITY_PER_LAP))
-    # per-race: translate target to constant per-lap hazard using a typical race length
-    pr = float(_cfg_get(cfg, ["reliability", "per_race_dnf"], RELIABILITY_PER_RACE_DNF))
+    if str(mode).lower() == "per_lap" and risk_vec is None:
+        p_pl = float(_cfg_get(cfg, ["reliability", "per_lap"], RELIABILITY_PER_LAP))
+        return np.array([p_pl], dtype=float)
+
+    base = float(_cfg_get(cfg, ["reliability", "per_race_dnf"], RELIABILITY_PER_RACE_DNF))
     typical = int(_cfg_get(cfg, ["reliability", "typical_race_laps"], RELIABILITY_TYPICAL_LAPS))
     typical = max(1, typical)
-    p_pl = 1.0 - (1.0 - pr) ** (1.0 / float(typical))
-    return float(np.clip(p_pl, 0.0, 1.0))
+
+    if risk_vec is None or not bool(_cfg_get(cfg, ["personality", "use"], False)):
+        p_pl = 1.0 - (1.0 - base) ** (1.0 / float(typical))
+        return np.array([float(np.clip(p_pl, 0.0, 1.0))], dtype=float)
+
+    amp = float(_cfg_get(cfg, ["personality", "risk_weight"], 1.0))
+    # multiplier ≈ [0.5, 1.5] when amp=1
+    mult = 1.0 + amp * (np.asarray(risk_vec, dtype=float) - 0.5)
+    mult = np.clip(mult, 0.5, 1.5)
+    p_race = np.clip(base * mult, 0.0, 0.9)
+    p_pl_vec = 1.0 - (1.0 - p_race) ** (1.0 / float(typical))
+    return p_pl_vec
 
 # ------------------- Degradation model (piecewise per compound) -------------------
 def _compound_for_all(cfg: dict, rng: np.random.Generator, D: int) -> List[str]:
@@ -474,14 +532,18 @@ def simulate_progress(
     seed: int,
     cfg: Optional[dict] = None,
 ):
-    if cfg is None: cfg = {}
+    if cfg is None:
+        cfg = {}
     rng = np.random.default_rng(seed)
-    drivers = ranking["driver"].tolist()
-    deltas = ranking["agg_delta_s"].to_numpy(dtype=float)
+
+    # --- Drivers & deltas (NEED these before personality) ---
+    drivers = ranking["driver"].astype(str).tolist()
+    deltas = pd.to_numeric(ranking["agg_delta_s"], errors="coerce").to_numpy(dtype=float)
     D = len(drivers)
 
     P = xy_path.shape[0]
-    # override DRS geometry constants from config
+
+    # --- Overtake/DRS params ---
     otk = get_overtake_params(cfg)
     global DRS_MIN_ENABLE_LAP, DRS_COOLDOWN_AFTER_SC_LAPS, DETECTION_OFFSET_FRACTION
     DRS_MIN_ENABLE_LAP = int(otk["drs_min_enable_lap"])
@@ -490,19 +552,34 @@ def simulate_progress(
     zones = _find_drs_zones(xy_path)
     det_eff = float(otk["drs_detect_thresh_s"])
 
-    # scale alpha by length of strongest DRS zone (like before)
-    def _seg_len(a,b): return (b - a + 1) if a <= b else (P - a) + (b + 1)
-    longest = max((_seg_len(a,b) for (a,b,_) in zones), default=int(0.12 * P))
+    # Scale alpha by length of strongest DRS zone (like before)
+    def _seg_len(a, b): return (b - a + 1) if a <= b else (P - a) + (b + 1)
+    longest = max((_seg_len(a, b) for (a, b, _) in zones), default=int(0.12 * P))
     frac = longest / float(P)
     baseline = 0.12
     scale = max(0.6, min(2.0, 1.0 + 1.5 * (frac - baseline)))
     alpha_eff = float(otk["alpha_pace"]) * scale
 
+    # --- Personality vectors (load AFTER drivers are known) ---
+    use_personality = bool(_cfg_get(cfg, ["personality", "use"], False))
+    if use_personality:
+        pers = _load_personality_scores(cfg, drivers)
+    else:
+        pers = {}
+
+    agg = np.array([pers.get(d, {}).get("aggression", 0.5) for d in drivers], dtype=float)
+    defence = np.array([pers.get(d, {}).get("defence", 0.5)   for d in drivers], dtype=float)
+    risk = np.array([pers.get(d, {}).get("risk", 0.5)         for d in drivers], dtype=float)
+
+    agg_w  = float(_cfg_get(cfg, ["personality", "agg_weight"], 1.0))
+    def_w  = float(_cfg_get(cfg, ["personality", "def_weight"], 1.0))
+    # risk_weight used inside per_lap_dnf_probability via cfg
+
     # Base lap + driver deltas + jitter
     base_driver = base_lap + deltas + rng.normal(0.0, noise_sd, size=D)
 
     # Degradation matrix (compound & track-type aware)
-    degrade = build_degradation_matrix(cfg, n_laps, drivers, rng)  # shape (L,D)
+    degrade = build_degradation_matrix(cfg, n_laps, drivers, rng)  # (L, D)
 
     # Random lap noise
     eps_lap = rng.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
@@ -512,97 +589,101 @@ def simulate_progress(
     lap_times = np.clip(lap_times, 60.0, 180.0)
     speed_pts_per_sec = P / lap_times
 
-    # Reliability per-lap probability (from per-race target)
-    p_dnf_per_lap = per_lap_dnf_probability(cfg, n_laps)
+    # Reliability per-lap probability (from per-race target), vectorized with risk
+    p_dnf_per_lap_vec = per_lap_dnf_probability(cfg, n_laps, risk if use_personality else None)
+    if p_dnf_per_lap_vec.size == 1:
+        p_dnf_per_lap_vec = np.repeat(p_dnf_per_lap_vec[0], D)
 
-    # State
+    # --- State ---
     curr_pts = np.zeros(D, dtype=float)
     curr_lap = np.zeros(D, dtype=int)
     last_pts = np.zeros(D, dtype=float)
     defended_this_lap = np.zeros(D, dtype=bool)
     drs_eligible = {i: {} for i in range(len(zones))}
 
-    phase = "GREEN"; vsc_ticks_remaining = 0; sc_laps_remaining = 0
-    drs_disabled_laps_remaining = DRS_MIN_ENABLE_LAP - 1  # kept for semantics
+    phase = "GREEN"
+    vsc_ticks_remaining = 0
+    sc_laps_remaining = 0
+    drs_disabled_until_lap = DRS_MIN_ENABLE_LAP
 
-    # Grid & start model
-    # Seed start order by ranking (best first) and apply a small random T1 gain/loss.
-    # Optionally bias mid/back to gain at T1 (START_GAIN_RANK_BIAS > 0).
-    start_gain_sd = float(_cfg_get(cfg, ["starts", "start_gain_sd"], START_GAIN_SD))
+    # --- Grid & start model ---
+    base_start_sd = float(_cfg_get(cfg, ["starts", "start_gain_sd"], START_GAIN_SD))
     rank_bias = float(_cfg_get(cfg, ["starts", "start_gain_rank_bias"], START_GAIN_RANK_BIAS))
-    # Convert seconds to track points for lap 1
     L0_speed = speed_pts_per_sec[0, :]
-    # rank position: 0 is pole ... D-1 backmarker
     ranks = np.arange(D, dtype=float)
-    bias = rank_bias * ((ranks - (D - 1) / 2.0) / max(1.0, D - 1))  # symmetric around mid-grid
-    start_gain_sec = rng.normal(0.0, start_gain_sd, size=D) + bias
+    bias = rank_bias * ((ranks - (D - 1) / 2.0) / max(1.0, D - 1))
+
+    if use_personality:
+        scale_vec = (1.0 + 0.6 * agg_w * (agg - 0.5)) * (1.0 - 0.4 * def_w * (defence - 0.5))
+        scale_vec = np.clip(scale_vec, 0.5, 1.5)
+    else:
+        scale_vec = np.ones(D, dtype=float)
+
+    start_gain_sec = rng.normal(0.0, base_start_sd, size=D) * scale_vec + bias
     start_gain_pts = start_gain_sec * L0_speed
-    # Apply as forward/backward movement before lights out
-    curr_pts = np.maximum(0.0, curr_pts + np.clip(start_gain_pts, -P*0.02, P*0.02))
+    curr_pts = np.maximum(0.0, curr_pts + np.clip(start_gain_pts, -P * 0.02, P * 0.02))
 
     positions_list = []; lapkey_list = []; leaderlap_list = []
     phase_flags = []; rc_texts = []; drs_on_flags = []; drs_banner = []
-    event_log: List[Tuple[float,str]] = []
+    event_log: List[Tuple[float, str]] = []
     orders = []; gaps_panel = []
 
-    def _order_indices() -> np.ndarray:
-        lk = curr_lap.astype(float) + (curr_pts / P)
-        return np.argsort(-lk)
-
     def _gap_seconds(i_follow: int, i_lead: int) -> float:
-        if curr_lap[i_follow] != curr_lap[i_lead]: return 99.0
+        if curr_lap[i_follow] != curr_lap[i_lead]:
+            return 99.0
         dp = (curr_pts[i_lead] - curr_pts[i_follow])
         if dp < 0: dp += P
-        L = min(curr_lap[i_follow], n_laps-1)
-        v = (P / lap_times[L, i_follow])  # follower pace
+        L = min(curr_lap[i_follow], n_laps - 1)
+        v = (P / lap_times[L, i_follow])
         return float(dp / max(v, 1e-6))
 
     def _in_range(prev: float, now: float, target: int) -> bool:
         if now >= prev: return (prev <= target) and (target < now)
-        else: return (target >= prev) or (target < now)
+        else:           return (target >= prev) or (target < now)
 
     def _apply_defense(i_lead: int):
-        L = min(curr_lap[i_lead], n_laps-1)
+        L = min(curr_lap[i_lead], n_laps - 1)
         v = speed_pts_per_sec[L, i_lead]
-        dist_pts = 0.06 * v  # DEFENSE_TIME_COST in seconds
+        dist_pts = 0.06 * v  # ~0.06s cost
         new_pts = curr_pts[i_lead] - dist_pts
         if new_pts < 0: new_pts += P
         curr_pts[i_lead] = new_pts
         defended_this_lap[i_lead] = True
 
     def _attempt_pass(i_follow: int, i_lead: int, gap_at_det_s: float, tsec: float):
-        L = min(curr_lap[i_follow], n_laps-1)
+        L = min(curr_lap[i_follow], n_laps - 1)
         pace_lead = lap_times[L, i_lead]
         pace_foll = lap_times[L, i_follow]
-        delta_norm = (pace_lead - pace_foll) / base_lap  # normalize by base, not leader lap
+        delta_norm = (pace_lead - pace_foll) / base_lap
         slip = DRS_SLIPSTREAM_BONUS if gap_at_det_s <= (det_eff * 1.2) else 0.0
         defended = 1.0 if defended_this_lap[i_lead] else 0.0
 
-        # logistic pass probability with track-configured coefficients
+        # Personality multipliers
+        att_mult = 1.0 + 0.8 * agg_w * (agg[i_follow] - 0.5) if use_personality else 1.0
+        def_mult = 1.0 + 0.8 * def_w * (defence[i_lead] - 0.5) if use_personality else 1.0
+
         dirty = float(otk["dirty_air_penalty"])
-        logit = alpha_eff * delta_norm + float(otk["beta_drs"]) * slip - float(otk["gamma_defend"]) * defended - dirty
+        logit = (alpha_eff * att_mult) * delta_norm + float(otk["beta_drs"]) * slip - (float(otk["gamma_defend"]) * def_mult) * defended - dirty
         p = 1.0 / (1.0 + math.exp(-logit))
-        if np.isfinite(p) and (np.random.random() < p):
+        if np.isfinite(p) and (rng.random() < p):
             car_len = max(1, int(P * 0.0025))
             curr_pts[i_follow] = (curr_pts[i_lead] + car_len) % P
             curr_pts[i_lead] = (curr_pts[i_lead] - car_len) % P
             event_log.append((tsec, f"PASS: {drivers[i_follow]} → {drivers[i_lead]} (DRS)"))
 
-    def _log(msg: str, tsec: float): event_log.append((tsec, msg))
+    def _log(msg: str, tsec: float):
+        event_log.append((tsec, msg))
 
     sim_time = 0.0
     max_time = n_laps * float(np.max(lap_times))
     T_max = int(math.ceil(max_time / DT)) + 1
-
-    # For DRS state
-    drs_disabled_until_lap = DRS_MIN_ENABLE_LAP
 
     for _ in range(T_max):
         # base speeds
         speeds = np.zeros(D, dtype=float)
         active = curr_lap < n_laps
         if active.any():
-            L = np.clip(curr_lap, 0, n_laps-1)
+            L = np.clip(curr_lap, 0, n_laps - 1)
             base_speed = speed_pts_per_sec[L, np.arange(D)]
             phase_factor = 1.0 if phase == "GREEN" else (VSC_SPEED_FACTOR if phase == "VSC" else SC_SPEED_FACTOR)
             speeds[active] = base_speed[active] * phase_factor
@@ -618,23 +699,23 @@ def simulate_progress(
             # clear any pending DRS entries for those drivers
             for z in drs_eligible.values():
                 for di in list(z.keys()):
-                    if crossed[di]: z.pop(di, None)
-            # Reliability checks happen on lap complete (per car)
-            if p_dnf_per_lap > 0:
-                indices = np.where(crossed)[0]
-                for di in indices:
-                    if np.random.random() < p_dnf_per_lap:
-                        curr_lap[di] = n_laps  # retire immediately
-                        speeds[di] = 0.0
-                        _log(f"DNF: {drivers[di]}", sim_time)
+                    if crossed[di]:
+                        z.pop(di, None)
+            # Reliability checks on lap complete (per car)
+            indices = np.where(crossed)[0]
+            for di in indices:
+                if rng.random() < float(p_dnf_per_lap_vec[di]):
+                    curr_lap[di] = n_laps  # retire immediately
+                    speeds[di] = 0.0
+                    _log(f"DNF: {drivers[di]}", sim_time)
 
         leader_completed = int(curr_lap.max() if curr_lap.size else 0)
 
         # Incidents -> SC/VSC
-        if phase == "GREEN" and leader_completed > 0 and np.random.random() < P_INCIDENT_PER_LAP:
-            if np.random.random() < SC_SHARE:
+        if phase == "GREEN" and leader_completed > 0 and rng.random() < P_INCIDENT_PER_LAP:
+            if rng.random() < SC_SHARE:
                 phase = "SC"
-                sc_laps_remaining = np.random.randint(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
+                sc_laps_remaining = rng.integers(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
                 order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
                 lead = order[0]; base_pos = curr_pts[lead]
                 for rank, di in enumerate(order):
@@ -648,14 +729,15 @@ def simulate_progress(
                 _log("SAFETY CAR DEPLOYED (yellow)", sim_time)
             else:
                 phase = "VSC"
-                vsec = float(np.random.uniform(VSC_DURATION_SEC_MINMAX[0], VSC_DURATION_SEC_MINMAX[1]))
+                vsec = float(rng.uniform(VSC_DURATION_SEC_MINMAX[0], VSC_DURATION_SEC_MINMAX[1]))
                 vsc_ticks_remaining = max(1, int(vsec / DT))
                 _log("VIRTUAL SAFETY CAR DEPLOYED", sim_time)
 
         if phase == "VSC":
             vsc_ticks_remaining -= 1
             if vsc_ticks_remaining <= 0:
-                phase = "GREEN"; _log("VSC END — GREEN FLAG", sim_time)
+                phase = "GREEN"
+                _log("VSC END — GREEN FLAG", sim_time)
         elif phase == "SC":
             if leader_completed > 0:
                 sc_laps_remaining -= 1
@@ -671,18 +753,25 @@ def simulate_progress(
         if phase == "GREEN":
             order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
             # simple blocking outside zones
-            P_DEFEND = 0.55
             BLOCKING_THRESH_S = 0.8
             for k in range(1, len(order)):
-                i_lead = order[k-1]; i_foll = order[k]
-                if curr_lap[i_lead] >= n_laps or curr_lap[i_foll] >= n_laps: continue
+                i_lead = order[k - 1]; i_foll = order[k]
+                if curr_lap[i_lead] >= n_laps or curr_lap[i_foll] >= n_laps:
+                    continue
                 in_any_zone = any(((zs <= curr_pts[i_foll] <= ze) if zs <= ze
                                    else (curr_pts[i_foll] >= zs or curr_pts[i_foll] <= ze))
                                   for (zs, ze, _) in zones)
                 if not in_any_zone:
                     gap_s = _gap_seconds(i_foll, i_lead)
-                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (np.random.random() < P_DEFEND):
-                        _apply_defense(i_lead); _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+0.06s)", sim_time)
+                    # personality-aware defend prob
+                    if use_personality:
+                        base_defend = 0.55
+                        P_DEFEND = float(np.clip(base_defend * (1.0 + 0.6 * def_w * (defence[i_lead] - 0.5)), 0.20, 0.95))
+                    else:
+                        P_DEFEND = 0.55
+                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (rng.random() < P_DEFEND):
+                        _apply_defense(i_lead)
+                        _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+0.06s)", sim_time)
 
         # DRS detection & passes
         if phase == "GREEN":
@@ -690,12 +779,14 @@ def simulate_progress(
             for zid, (zs, ze, zd) in enumerate(zones):
                 if drs_enabled:
                     for idx in order[1:]:
-                        if curr_lap[idx] >= n_laps: continue
+                        if curr_lap[idx] >= n_laps:
+                            continue
                         if _in_range(last_pts[idx], curr_pts[idx], zd):
                             pos = list(order).index(idx)
                             if pos > 0:
-                                ahead = order[pos-1]
-                                if curr_lap[ahead] >= n_laps: continue
+                                ahead = order[pos - 1]
+                                if curr_lap[ahead] >= n_laps:
+                                    continue
                                 gap_s = _gap_seconds(idx, ahead)
                                 if gap_s <= det_eff:
                                     drs_eligible[zid][idx] = (ahead, gap_s)
@@ -704,13 +795,12 @@ def simulate_progress(
                                     drs_eligible[zid].pop(idx, None)
                 for idx, (ahead, gap_at_det) in list(drs_eligible[zid].items()):
                     if curr_lap[idx] >= n_laps or curr_lap[ahead] >= n_laps:
-                        drs_eligible[zid].pop(idx, None); continue
-                    # attempt pass at end of zone
-                    def _in_zone(a, b, x): return (a <= b and a <= x <= b) or (a > b and (x >= a or x <= b))
+                        drs_eligible[zid].pop(idx, None)
+                        continue
                     if _in_range(last_pts[idx], curr_pts[idx], ze):
                         curr_order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
                         pos = list(curr_order).index(idx)
-                        if pos > 0 and curr_order[pos-1] == ahead:
+                        if pos > 0 and curr_order[pos - 1] == ahead:
                             _attempt_pass(idx, ahead, gap_at_det, sim_time)
                         drs_eligible[zid].pop(idx, None)
 
@@ -736,7 +826,8 @@ def simulate_progress(
                 else:
                     g = _gap_seconds(idx, order[0])
                     gaps.append("+—" if g >= 98.0 else f"+{g:,.3f}")
-                if drs_enabled and has_drs[idx]: gaps[-1] += f" {DRS_TAG}"
+                if drs_enabled and has_drs[idx]:
+                    gaps[-1] += f" {DRS_TAG}"
         gaps_panel.append(gaps)
 
         recent = [f"t={sim_time:5.1f}s  {m}" for (t, m) in event_log if t <= sim_time]
@@ -744,7 +835,8 @@ def simulate_progress(
         rc_texts.append(wrapped if wrapped else ["—"])
 
         sim_time += DT
-        if (curr_lap >= n_laps).all(): break
+        if (curr_lap >= n_laps).all():
+            break
 
     positions = np.stack(positions_list, axis=0)
     lap_key = np.stack(lapkey_list, axis=0)
@@ -847,6 +939,8 @@ def build_animation(
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines",
                                  line=dict(width=6, color="rgba(30,144,255,0.18)"),
                                  showlegend=False, name="DRS zone"), row=1, col=1)
+    # initial lap label for the static (first) frame
+    initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
 
     # Axes/layout
     pad = 0.08
@@ -876,6 +970,9 @@ def build_animation(
 
     banner_text, banner_bg = _flag_style(phase_flags[0] if len(phase_flags) else "GREEN")
     drs_tag = drs_banner[0] if len(drs_banner) else "DRS DISABLED"
+    # initial lap label for the static (first) frame
+    initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
+
     fig.update_layout(
         height=920,
         margin=dict(l=16, r=16, t=140, b=20),
@@ -883,7 +980,7 @@ def build_animation(
         updatemenus=[dict(type="buttons", showactive=False, x=0.48, y=1.16, xanchor="center", buttons=buttons)],
         title=f"Equal-Car Replay  •  DRSα={alpha_eff:.2f}  det≈{det_eff:.2f}s",
         annotations=[
-            dict(text=f"Lap 1 / {N_LAPS}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
+            dict(text=f"Lap {initial_lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d")),
             dict(text=banner_text, showarrow=False, x=0.50, y=1.17, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d"), bgcolor=banner_bg),
@@ -898,52 +995,113 @@ def build_animation(
     frames = []
     for ti in range(T):
         order = orders[ti]
-        table_positions = list(range(1, D+1))
+        table_positions = list(range(1, D + 1))
         table_drivers = [labels[i] for i in order]
         table_gaps = gaps_panel[ti]
-        lap_disp = int(np.clip(leader_lap[ti], 1, N_LAPS))
+
+        # use the function arg n_laps (not the module constant N_LAPS)
+        lap_disp = int(np.clip(leader_lap[ti], 1, n_laps))
+
         banner_text, banner_bg = _flag_style(phase_flags[ti])
         track_col = _track_color(phase_flags[ti])
-        sc_marker = go.Scatter(x=[xy_path[0,0]], y=[xy_path[0,1]], mode="markers",
-                               marker=dict(size=14, color="rgba(255,212,0,0.9)", symbol="square"),
-                               showlegend=False, name="SC") if phase_flags[ti]=="SC" else go.Scatter()
+        sc_marker = (
+            go.Scatter(
+                x=[xy_path[0, 0]],
+                y=[xy_path[0, 1]],
+                mode="markers",
+                marker=dict(size=14, color="rgba(255,212,0,0.9)", symbol="square"),
+                showlegend=False,
+                name="SC",
+            )
+            if phase_flags[ti] == "SC"
+            else go.Scatter()
+        )
         rc_lines = rc_texts[ti]
 
         frame_data = [
-            go.Scatter(x=xy_path[:,0], y=xy_path[:,1], line=dict(width=2, color=track_col)),
-            go.Scatter(x=positions[ti,:,0], y=positions[ti,:,1],
-                       mode=("markers+text" if SHOW_MARKER_LABELS else "markers"),
-                       text=(labels if SHOW_MARKER_LABELS else None)),
-            sc_marker,
-        ] + [go.Scatter() for _ in range(D)] + [
-            go.Table(columnwidth=[0.22,0.38,0.40],
-                     header=dict(values=["<b>Position</b>","<b>Driver</b>","<b>Time</b>"],
-                                 fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
-                     cells=dict(values=[table_positions, table_drivers, table_gaps],
-                                fill_color="#0f1720", font=dict(color="white", size=12),
-                                align="left", height=22)),
-            go.Table(columnwidth=[1.0],
-                     header=dict(values=["<b>Race Control</b>"],
-                                 fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
-                     cells=dict(values=[rc_lines],
-                                fill_color="#0f1720", font=dict(color="white", size=12),
-                                align="left", height=22)),
-        ]
+                         go.Scatter(x=xy_path[:, 0], y=xy_path[:, 1], line=dict(width=2, color=track_col)),
+                         go.Scatter(
+                             x=positions[ti, :, 0],
+                             y=positions[ti, :, 1],
+                             mode=("markers+text" if SHOW_MARKER_LABELS else "markers"),
+                             text=(labels if SHOW_MARKER_LABELS else None),
+                         ),
+                         sc_marker,
+                     ] + [go.Scatter() for _ in range(D)] + [
+                         go.Table(
+                             columnwidth=[0.22, 0.38, 0.40],
+                             header=dict(
+                                 values=["<b>Position</b>", "<b>Driver</b>", "<b>Time</b>"],
+                                 fill_color="#2b2f3a",
+                                 font=dict(color="white", size=13),
+                                 align="left",
+                             ),
+                             cells=dict(
+                                 values=[table_positions, table_drivers, table_gaps],
+                                 fill_color="#0f1720",
+                                 font=dict(color="white", size=12),
+                                 align="left",
+                                 height=22,
+                             ),
+                         ),
+                         go.Table(
+                             columnwidth=[1.0],
+                             header=dict(
+                                 values=["<b>Race Control</b>"],
+                                 fill_color="#2b2f3a",
+                                 font=dict(color="white", size=13),
+                                 align="left",
+                             ),
+                             cells=dict(
+                                 values=[rc_lines],
+                                 fill_color="#0f1720",
+                                 font=dict(color="white", size=12),
+                                 align="left",
+                                 height=22,
+                             ),
+                         ),
+                     ]
 
-        frames.append(go.Frame(
-            data=frame_data,
-            layout=go.Layout(annotations=[
-                dict(text=f"Lap {lap_disp} / {N_LAPS}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
-                     font=dict(size=14, color="#1f2d3d")),
-                dict(text=banner_text, showarrow=False, x=0.50, y=1.17, xref="paper", yref="paper",
-                     font=dict(size=14, color="#1f2d3d"), bgcolor=banner_bg),
-                dict(text=("DRS ENABLED" if "ENABLED" in drs_banner[ti] else "DRS DISABLED"),
-                     showarrow=False, x=0.78, y=1.17, xref="paper", yref="paper",
-                     font=dict(size=14, color="#1f2d3d"),
-                     bgcolor="#e8f1ff" if ("ENABLED" in drs_banner[ti]) else "#ffd6d6"),
-            ]),
-            name=str(ti),
-        ))
+        frames.append(
+            go.Frame(
+                data=frame_data,
+                layout=go.Layout(
+                    annotations=[
+                        dict(
+                            text=f"Lap {lap_disp} / {n_laps}",
+                            showarrow=False,
+                            x=0.21,
+                            y=1.17,
+                            xref="paper",
+                            yref="paper",
+                            font=dict(size=14, color="#1f2d3d"),
+                        ),
+                        dict(
+                            text=banner_text,
+                            showarrow=False,
+                            x=0.50,
+                            y=1.17,
+                            xref="paper",
+                            yref="paper",
+                            font=dict(size=14, color="#1f2d3d"),
+                            bgcolor=banner_bg,
+                        ),
+                        dict(
+                            text=("DRS ENABLED" if "ENABLED" in drs_banner[ti] else "DRS DISABLED"),
+                            showarrow=False,
+                            x=0.78,
+                            y=1.17,
+                            xref="paper",
+                            yref="paper",
+                            font=dict(size=14, color="#1f2d3d"),
+                            bgcolor="#e8f1ff" if ("ENABLED" in drs_banner[ti]) else "#ffd6d6",
+                        ),
+                    ]
+                ),
+                name=str(ti),
+            )
+        )
+
     fig.frames = frames
     return fig
 
