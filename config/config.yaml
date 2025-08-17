@@ -53,3 +53,68 @@ viz_track:
   grand_prix: "Canada"
   session: "R"
 
+# ===== Equal-car visualization (optional overrides) =====
+visualize_equal_race:
+  use_event_specific_deltas: true     # use that event’s delta_event if available
+  target_gp_substr: "canadian"        # which event file to pull (case-insensitive substring)
+  base_lap_sec: 90.0                  # baseline lap time for the sim (seconds)
+  n_laps: 20                          # number of laps to simulate
+  dt: 0.5                             # timestep (seconds) for animation/sim
+  lap_jitter_sd: 0.12                 # lap-to-lap random noise (seconds)
+
+# ===== Reliability model =====
+reliability:
+  mode: "per_race"            # "per_race" (recommended) or "per_lap"
+  per_race_dnf: 0.10          # ~10% chance a car DNFs over a typical race
+  typical_race_laps: 70       # used to derive per-lap hazard
+  # If mode == "per_lap", set:
+  # per_lap: 0.0015
+
+# ===== Tyre degradation (compound- & track-type aware) =====
+degradation:
+  # Optional: sample compounds per driver by mix; else use default_compound
+  compound_mix:
+    S: 0.25
+    M: 0.50
+    H: 0.25
+  default_compound: "M"
+
+  # Piecewise slopes in seconds per lap and a switch lap
+  compounds:
+    S: { early_slope: 0.035, late_slope: 0.010, switch_lap: 10 }
+    M: { early_slope: 0.020, late_slope: 0.012, switch_lap: 14 }
+    H: { early_slope: 0.010, late_slope: 0.015, switch_lap: 18 }
+
+  # Track-type multipliers (heuristic: street vs permanent)
+  track_type_multipliers:
+    street: 1.15
+    permanent: 1.00
+    high_deg: 1.25
+    low_deg: 0.90
+
+# ===== Overtaking (logistic) =====
+overtaking:
+  alpha_pace: 6.0                 # effect of normalized pace gap
+  beta_drs: 1.5                   # DRS bonus
+  gamma_defend: 1.2               # penalty if leader defended earlier
+  dirty_air_penalty: 0.15         # baseline difficulty to pass
+  drs_detect_thresh_s: 1.0        # DRS detection gap (seconds)
+  detection_offset_fraction: 0.03 # detection point upstream of zone start (fraction of lap)
+  drs_min_enable_lap: 3           # DRS available after this leader lap (F1-style)
+  drs_cooldown_after_sc_laps: 2   # delay after SC in-lap before re-enabling DRS
+
+  # Track-specific overrides by GP substring (case-insensitive)
+  track_overrides:
+    monaco:
+      dirty_air_penalty: 0.35
+      drs_detect_thresh_s: 0.8
+      alpha_pace: 4.0
+    monza:
+      dirty_air_penalty: 0.05
+      drs_detect_thresh_s: 1.2
+      alpha_pace: 7.5
+
+# ===== Starts (T1 variability) =====
+starts:
+  start_gain_sd: 0.08           # random start gain/loss in seconds (small)
+  start_gain_rank_bias: 0.03    # >0 lets mid/back gain a touch on average; 0 for neutral
