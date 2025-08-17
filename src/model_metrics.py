@@ -63,25 +63,122 @@ def _se_from_residuals(resid: np.ndarray, n: int) -> float:
     return sd / math.sqrt(max(n, 1))
 
 
-def _empirical_bayes_shrinkage(delta: pd.Series, se: pd.Series) -> Tuple[pd.Series, pd.Series]:
-    """
-    Simple EB shrinkage toward 0 (global mean). Estimates tau^2 via method-of-moments:
-      Var(observed) = tau^2 + mean(se^2)  => tau^2 = max(Var(observed) - mean(se^2), eps)
-    Returns (shrunk_delta, shrinkage_weight)
-    """
-    delta = pd.to_numeric(delta, errors="coerce")
-    se2 = pd.to_numeric(se, errors="coerce") ** 2
-    valid = delta.notna() & se2.notna() & (se2 >= 0)
-    if valid.sum() == 0:
-        return delta, pd.Series(np.zeros_like(delta), index=delta.index)
+# ---------- Smarter Empirical Bayes shrinker ----------
+def _read_shrinkage_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch shrinkage config with sensible defaults."""
+    s = cfg.get("shrinkage", {}) or {}
+    return {
+        "target": str(s.get("target", "field_mean")).lower(),  # "field_mean" | "team_mean" | "zero"
+        "include_team_re": bool(s.get("include_team_re", True)),
+        "prior_var_mode": str(s.get("prior_var_mode", "moments")).lower(),  # "moments" | "fixed"
+        "prior_var_fixed": float(s.get("prior_var_fixed", 0.0)),  # used if prior_var_mode == "fixed"
+        "min_prior_var": float(s.get("min_prior_var", 1e-6)),
+    }
 
-    var_obs = float(np.nanvar(delta[valid], ddof=1)) if valid.sum() > 1 else 0.0
-    mean_se2 = float(np.nanmean(se2[valid])) if valid.any() else 0.0
-    tau2 = max(var_obs - mean_se2, 1e-6)
 
-    w = tau2 / (tau2 + se2.replace(0.0, 1e-9))
-    shrunk = w * delta.fillna(0.0)  # shrink toward 0
-    return shrunk, w
+def _moments_tau2(resid: pd.Series, se2: pd.Series, min_prior_var: float) -> float:
+    """
+    Method-of-moments for tau^2 using centered residuals:
+      Var(observed residuals) ≈ tau^2 + mean(se^2)
+    """
+    valid = resid.notna() & se2.notna() & (se2 >= 0)
+    if valid.sum() <= 1:
+        return max(min_prior_var, 0.0)
+    var_obs = float(np.nanvar(resid[valid], ddof=1))
+    mean_se2 = float(np.nanmean(se2[valid]))
+    return max(var_obs - mean_se2, min_prior_var)
+
+
+def _team_level_shrink(
+    delta: pd.Series,
+    se: pd.Series,
+    team: Optional[pd.Series],
+    cfg_sh: Dict[str, Any],
+) -> pd.Series:
+    """
+    Optional team random effect: compute team means, shrink them toward field mean,
+    then return the shrunk team mean for each row's team as the per-driver target.
+    """
+    if team is None or team.isna().all():
+        # No teams; fall back to field mean target
+        mu_field = float(pd.to_numeric(delta, errors="coerce").mean())
+        return pd.Series(mu_field, index=delta.index)
+
+    d = pd.to_numeric(delta, errors="coerce")
+    s2 = (pd.to_numeric(se, errors="coerce") ** 2).replace([np.inf, -np.inf], np.nan)
+
+    # Team raw means (ignore NaN deltas)
+    by_team = pd.DataFrame({"delta": d, "se2": s2, "team": team}).dropna(subset=["delta"])
+    if by_team.empty:
+        mu_field = float(d.mean())
+        return pd.Series(mu_field, index=delta.index)
+
+    tm = by_team.groupby("team", dropna=False)["delta"].mean()
+    # Approximate sampling variance for team mean: mean(se^2)/n
+    n_t = by_team.groupby("team", dropna=False)["delta"].size().astype(float)
+    mean_se2_t = by_team.groupby("team", dropna=False)["se2"].mean().fillna(0.0)
+    se2_team_mean = (mean_se2_t / n_t.clip(lower=1.0)).reindex(tm.index).fillna(0.0)
+
+    # Shrink team means toward field mean using EB at team level
+    mu_field = float(tm.mean())
+    resid_t = tm - mu_field
+    tau2_team = _moments_tau2(resid_t, se2_team_mean, cfg_sh["min_prior_var"]) \
+        if cfg_sh["prior_var_mode"] == "moments" else max(cfg_sh["prior_var_fixed"], cfg_sh["min_prior_var"])
+    w_t = tau2_team / (tau2_team + se2_team_mean.replace(0.0, 1e-12))
+    tm_shrunk = mu_field + w_t * (tm - mu_field)
+
+    return team.map(tm_shrunk).fillna(mu_field)
+
+
+def _empirical_bayes_shrinkage_smart(
+    delta: pd.Series,
+    se: pd.Series,
+    team: Optional[pd.Series],
+    cfg: Dict[str, Any],
+) -> Tuple[pd.Series, pd.Series, float]:
+    """
+    General EB shrinkage:
+      - Target can be "field_mean", "team_mean", or "zero"
+      - Optional team random effect adjusts the target via shrunk team means
+      - Prior variance tau^2 via method-of-moments (default) or fixed
+    Returns: (shrunk_delta, shrink_weight, tau2)
+    """
+    cfg_sh = _read_shrinkage_cfg(cfg)
+    d = pd.to_numeric(delta, errors="coerce")
+    s2 = (pd.to_numeric(se, errors="coerce") ** 2).replace([np.inf, -np.inf], np.nan)
+
+    # Determine target mean per row
+    target_mode = cfg_sh["target"]
+    if target_mode == "zero":
+        mu = pd.Series(0.0, index=d.index)
+    elif target_mode == "team_mean":
+        # Plain team mean (exclude self would be too noisy; use all available)
+        if team is None or team.isna().all():
+            mu = pd.Series(float(d.mean()), index=d.index)
+        else:
+            mu = pd.Series(index=d.index, dtype=float)
+            tmp = pd.DataFrame({"team": team, "d": d})
+            team_mean = tmp.groupby("team", dropna=False)["d"].transform("mean")
+            mu = team_mean
+    else:  # "field_mean" (default)
+        mu = pd.Series(float(d.mean()), index=d.index)
+
+    # Optional team random-effect: refine mu by shrinking team means toward field mean
+    if cfg_sh["include_team_re"]:
+        mu = _team_level_shrink(d, se, team, cfg_sh)
+
+    # Compute prior variance tau^2
+    if cfg_sh["prior_var_mode"] == "fixed":
+        tau2 = max(cfg_sh["prior_var_fixed"], cfg_sh["min_prior_var"])
+    else:
+        resid = d - mu
+        tau2 = _moments_tau2(resid, s2, cfg_sh["min_prior_var"])
+
+    # EB weight and shrink
+    w = tau2 / (tau2 + s2.replace(0.0, 1e-12))
+    shrunk = mu + w * (d - mu)
+
+    return shrunk, w, float(tau2)
 
 
 # ---------- Column coalescers ----------
@@ -496,17 +593,23 @@ def combine_event_metrics(
     comb = m.apply(_combine_row, axis=1)
     m = pd.concat([m, comb], axis=1)
 
-    # Empirical-Bayes shrinkage (toward 0 = equal to teammate)
+    # Smarter Empirical-Bayes shrinkage (toward smart target, with optional team RE)
     if apply_bayes_shrinkage:
-        for col_delta, col_se, out_col, w_col in [
-            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w"),
-            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w"),
-            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w"),
+        # We will shrink race, quali, and event deltas separately.
+        for (col_delta, col_se, out_col, w_col, tau_col) in [
+            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_tau2"),
+            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_tau2"),
+            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w", "event_tau2"),
         ]:
             if col_delta in m.columns and col_se in m.columns:
-                shrunk, w = _empirical_bayes_shrinkage(m[col_delta], m[col_se])
+                shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
+                    m[col_delta], m[col_se], m.get("team"), cfg={}
+                )
+                # Pass actual config from outer scope by closure? We'll set below in compute_event_metrics.
+                # In this function (standalone), fall back to defaults if cfg not injected.
                 m[out_col] = shrunk
                 m[w_col] = w
+                m[tau_col] = float(tau2)
 
     return m
 
@@ -590,11 +693,26 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
         columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
     )
 
-    # Precision-weighted combination now happens inside combine_event_metrics
+    # Precision-weighted combination to produce event-level delta/SE
     wR = float(cfg.get("wR", 0.6))  # ignored by precision weighting but kept for backward compatibility
     wQ = float(cfg.get("wQ", 0.4))  # ignored by precision weighting but kept for backward compatibility
     apply_bayes = bool(cfg.get("apply_bayes_shrinkage", True))
-    merged = combine_event_metrics(race_out, quali_out, wR=wR, wQ=wQ, apply_bayes_shrinkage=apply_bayes)
+    merged = combine_event_metrics(race_out, quali_out, wR=wR, wQ=wQ, apply_bayes_shrinkage=False)
+
+    # Apply smarter EB shrinkage HERE (so we can pass cfg properly)
+    if apply_bayes:
+        for (col_delta, col_se, out_col, w_col, tau_col) in [
+            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_tau2"),
+            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_tau2"),
+            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w", "event_tau2"),
+        ]:
+            if col_delta in merged.columns and col_se in merged.columns:
+                shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
+                    merged[col_delta], merged[col_se], merged.get("team"), cfg
+                )
+                merged[out_col] = shrunk
+                merged[w_col] = w
+                merged[tau_col] = float(tau2)
 
     meta = {
         "year": event.get("year"),

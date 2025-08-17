@@ -40,8 +40,16 @@ weighting:
   race_sample_weight: 1.0          # weight per race lap contributing (race_n)
   quali_sample_weight: 1.0         # weight per quali segment contributing (quali_k)
 
+  shrinkage:
+    target: "field_mean"        # "field_mean" | "team_mean" | "zero"
+    include_team_re: true       # shrink team means toward field mean first
+    prior_var_mode: "moments"   # "moments" (method-of-moments) or "fixed"
+    prior_var_fixed: 0.0        # used iff prior_var_mode == "fixed" (seconds^2)
+    min_prior_var: 1e-6         # lower bound for tau^2
+
 # === Visualization track (for outline helper) ===
 viz_track:
   year: 2025
   grand_prix: "Canada"
   session: "R"
+
