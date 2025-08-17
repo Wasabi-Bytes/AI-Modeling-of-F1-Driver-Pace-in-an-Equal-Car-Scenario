@@ -37,6 +37,32 @@ def enable_cache(cache_dir: str) -> None:
     fastf1.Cache.enable_cache(str(cache_dir_abs))
 
 
+# ====================== NEW: Weather & summaries helpers ======================
+def _ensure_weather_cols(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    for c in ("ambient_temp_c", "track_temp_c"):
+        if c not in d.columns:
+            d[c] = np.nan
+    return d
+
+
+def _summarize_event_weather(df: pd.DataFrame) -> Dict[str, Any]:
+    d = df
+    out: Dict[str, Any] = {}
+    for c in ("ambient_temp_c", "track_temp_c"):
+        if c in d.columns:
+            vals = pd.to_numeric(d[c], errors="coerce").to_numpy()
+            mask = ~np.isnan(vals)
+            out[f"pct_nonan_{c}"] = float(mask.mean()) if vals.size else 0.0
+            out[f"median_{c}"] = float(np.nanmedian(vals[mask])) if mask.any() else float("nan")
+        else:
+            out[f"median_{c}"] = float("nan")
+            out[f"pct_nonan_{c}"] = 0.0
+    return out
+
+# ============================================================================
+
+
 # -------- Fallback recent events (kept for backwards-compat) --------
 def get_recent_races(_: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Legacy path used only if no season config is provided.
@@ -272,6 +298,7 @@ def _build_interaction_table(
     ses: Any,
     *,
     session_kind: str,
+    merge_tolerance_seconds: int = 120,   # <-- NEW: config-driven tolerance
 ) -> pd.DataFrame:
     if laps_raw is None or len(laps_raw) == 0:
         return pd.DataFrame()
@@ -328,12 +355,17 @@ def _build_interaction_table(
                     wx2 = wx2.sort_values("__wx_time__")
                     merged = pd.merge_asof(
                         dd, wx2,
-                        left_on="__ref_time__", right_on="__wx_time__", direction="nearest", tolerance=pd.Timedelta("120s")
+                        left_on="__ref_time__", right_on="__wx_time__",
+                        direction="nearest",
+                        tolerance=pd.Timedelta(f"{merge_tolerance_seconds}s")  # <-- NEW: config tolerance
                     )
                     d["ambient_temp_c"] = merged["ambient_temp_c"].values
                     d["track_temp_c"] = merged["track_temp_c"].values
     except Exception:
         pass
+
+    # Guarantee presence even if merge failed (NEW)
+    d = _ensure_weather_cols(d)
 
     d["gap_ahead_s"] = np.nan
     d["gap_behind_s"] = np.nan
@@ -440,6 +472,10 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     enable_cache(config["cache_dir"])
 
+    # NEW: read weather knobs (one-liner to make them live)
+    weather_cfg = (config.get("weather") or {})
+    merge_tol_sec = int(weather_cfg.get("merge_tolerance_seconds", 120))
+
     # Prefer full-season enumeration when config.season is present; otherwise fallback to legacy list
     season_cfg = config.get("season")
     if season_cfg is not None:
@@ -459,6 +495,10 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     attempted_sessions = 0
     loaded_events = 0
 
+    # NEW: loaded vs skipped labels
+    loaded_labels: List[str] = []
+    skipped_labels: List[str] = []
+
     for ev in gp_iter:
         year, key, label = ev["year"], ev["key"], ev["label"]
 
@@ -467,10 +507,12 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         race_laps_raw, ses_r = load_session(year, key, "R")
         if race_laps_raw is None or len(race_laps_raw) == 0:
             print(f"[WARN] No race laps for {year} {label}")
+            skipped_labels.append(f"{year} {label}")  # NEW: record skip
             continue
 
         race_laps, qa_r = _derive_and_filter_tags(race_laps_raw, session_kind="R")
-        race_inter = _build_interaction_table(race_laps_raw, ses_r, session_kind="R")
+        race_inter = _build_interaction_table(race_laps_raw, ses_r, session_kind="R",
+                                              merge_tolerance_seconds=merge_tol_sec)  # NEW: pass tolerance
         start_deltas = _compute_start_deltas(race_laps_raw, ses_r)
 
         entry: Dict[str, Any] = {
@@ -488,13 +530,17 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             quali_laps_raw, ses_q = load_session(year, key, "Q")
             if quali_laps_raw is not None and len(quali_laps_raw) > 0:
                 quali_laps, qa_q = _derive_and_filter_tags(quali_laps_raw, session_kind="Q")
-                quali_inter = _build_interaction_table(quali_laps_raw, ses_q, session_kind="Q")
+                quali_inter = _build_interaction_table(quali_laps_raw, ses_q, session_kind="Q",
+                                                       merge_tolerance_seconds=merge_tol_sec)  # NEW: pass tolerance
                 entry["quali_laps"] = quali_laps
                 entry["quali_interactions"] = quali_inter
                 entry["qa"]["quali"] = qa_q
             else:
                 entry["quali_laps"] = None
                 entry["quali_interactions"] = None
+
+        # NEW: Weather medians per event (for viz and sim knobs)
+        entry["weather_summary"] = _summarize_event_weather(race_inter)
 
         # Optional diagnostics persistence
         try:
@@ -514,6 +560,13 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         out.append(entry)
         loaded_events += 1
+        loaded_labels.append(f"{year} {label}")  # NEW: record loaded
+
+    # NEW: human-friendly summary
+    if loaded_labels:
+        logging.info("[summary] Loaded GPs (%d): %s", len(loaded_labels), "; ".join(loaded_labels))
+    if skipped_labels:
+        logging.info("[summary] Skipped (no data yet) (%d): %s", len(skipped_labels), "; ".join(skipped_labels))
 
     logging.info(f"[load_data] Attempted sessions: {attempted_sessions} "
                  f"(~2 × rounds if Q included). Loaded events: {loaded_events}")
@@ -588,6 +641,9 @@ if __name__ == "__main__":
         print("[INFO] Race interaction table columns (sample):", inter_cols[:10], "…")
         if not first["race_start_deltas"].empty:
             print("[INFO] Start deltas head:\n", first["race_start_deltas"].head())
+
+        # NEW: show weather summary presence
+        print("[INFO] Weather summary for first event:", first.get("weather_summary", {}))
 
     outline = get_track_outline(cfg)
     if outline is not None:

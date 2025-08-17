@@ -16,6 +16,7 @@ weather:
     enable: true
     base_c: 35           # reference track temperature (°C)
     k_per_15c: 0.08      # +8% deg for each +15°C above base
+  temp_bins_c: [28, 35]  # → <28, 28–35, >35 (used only by diagnostics)
 
 # ===== Viz (overlays) =====
 viz:
