@@ -131,7 +131,7 @@ def _load_track_meta(cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
     std["downforce_index"] = pd.to_numeric(meta.get("downforce_index", meta.get(cols.get("downforce_index", ""), np.nan)), errors="coerce")
     std["drs_zones"] = pd.to_numeric(meta.get("drs_zones", meta.get(cols.get("drs_zones", ""), np.nan)), errors="coerce")
     std["overtaking_difficulty"] = pd.to_numeric(meta.get("overtaking_difficulty", meta.get(cols.get("overtaking_difficulty", ""), np.nan)), errors="coerce")
-    std["speed_bias"] = meta.get("speed_bias", meta.get(cols.get("speed_bias", ""), np.nan))
+    std["speed_bias"] = pd.to_numeric(meta.get("speed_bias", meta.get(cols.get("speed_bias", ""), np.nan)), errors="coerce")
     meta_std = pd.concat([meta[["event_key_norm"]], pd.DataFrame(std)], axis=1)
     return meta_std
 
@@ -188,6 +188,23 @@ def _invvar(se: pd.Series, eps: float = 1e-9) -> pd.Series:
     if base.notna().sum() == 0:
         base = pd.Series(1.0, index=se.index)  # uniform fallback
     return base
+
+
+def _read_recency_knobs(cfg: Dict[str, Any]) -> Tuple[str, float, float]:
+    """
+    Support both legacy `weighting` and new `aggregation` sections.
+    Returns (mode, per_event_decay, half_life_days).
+    """
+    if isinstance(cfg.get("weighting", {}), dict) and cfg["weighting"]:
+        w = cfg["weighting"]
+        mode = str(w.get("recency_mode", "event_index")).lower()  # "event_index" | "date_half_life"
+        return mode, float(w.get("event_recency_decay", 0.92)), float(w.get("half_life_days", 120.0))
+
+    # Fallback to aggregation section
+    a = cfg.get("aggregation", {}) or {}
+    use_date = bool(a.get("use_date_decay", True))
+    mode = "date_half_life" if use_date else "event_index"
+    return mode, float(a.get("per_event_decay", 0.92)), float(a.get("half_life_days", 120.0))
 
 
 def _recency_factor(
@@ -259,17 +276,16 @@ def _aggregate_frame(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[pd.D
     df["event_se_pick"] = se
 
     # --- Config ---
+    mode, event_decay, half_life_days = _read_recency_knobs(cfg)
+
     wcfg = cfg.get("weighting", {}) if isinstance(cfg.get("weighting", {}), dict) else {}
-    recency_mode = str(wcfg.get("recency_mode", "event_index")).lower()  # "event_index" | "date_half_life"
-    event_decay = float(wcfg.get("event_recency_decay", 0.92))
-    half_life_days = float(wcfg.get("half_life_days", 120.0))
     race_sample_w = float(wcfg.get("race_sample_weight", 1.0))
     quali_sample_w = float(wcfg.get("quali_sample_weight", 1.0))
 
     # --- Weight components ---
     invvar = _invvar(df["event_se_pick"])  # 1/SE^2
     recency, events_ago, days_ago = _recency_factor(
-        df, recency_mode, "event_idx", "event_date", event_decay, half_life_days
+        df, mode, "event_idx", "event_date", event_decay, half_life_days
     )
     sample = _sample_factor(df, race_sample_w, quali_sample_w)
 
@@ -289,7 +305,8 @@ def _aggregate_frame(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[pd.D
         "event_delta_s", "event_delta_s_shrunk", "event_se_s",
         "event_wR_eff", "event_wQ_eff",
         # optional meta if present
-        "track_type", "downforce_index", "df_bucket"
+        "track_type", "downforce_index", "df_bucket",
+        "drs_zones", "speed_bias", "overtaking_difficulty",
     ]
     present_cols = [c for c in keep_cols if c in df.columns]
     event_breakdown = (
@@ -526,7 +543,6 @@ def main():
     driver_forecast = forecast_profile(events_df, cfg)
 
     # ---- Save outputs ----
-    # Keep the original file name for backward compatibility
     out_dir.mkdir(parents=True, exist_ok=True)
     driver_ranking_global.to_csv(out_dir / "driver_ranking.csv", index=False)
     event_breakdown.to_csv(out_dir / "event_breakdown.csv", index=False)

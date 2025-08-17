@@ -69,14 +69,19 @@ def _se_from_residuals(resid: np.ndarray, n: int) -> float:
 
 
 # ============================================================
+# ============================================================
 # =============== Track metadata (lazy load) =================
 # ============================================================
 _TRACK_META_CACHE: Optional[pd.DataFrame] = None
 
+def _project_root() -> Path:  # keep local copy used above
+    return Path(__file__).resolve().parent.parent
+
 def _load_track_meta(cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
     """
     Read data/track_meta.csv if present and normalize columns:
-      event_key, track_type (lowercased), downforce_index [0,1], drs_zones, speed_bias, overtaking_difficulty
+      event_key, track_type (lowercased), downforce_index [0,1],
+      drs_zones, speed_bias, overtaking_difficulty
     """
     global _TRACK_META_CACHE
     if _TRACK_META_CACHE is not None:
@@ -96,31 +101,37 @@ def _load_track_meta(cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
         _TRACK_META_CACHE = None
         return None
 
+    # Normalize column names
     cols = {c.lower(): c for c in tm.columns}
-    # Expect event_key & at least one of track_type/downforce_index
-    if "event_key" not in cols:
-        # Try to infer: sometimes users name it "event" or similar
-        if "event" in cols:
-            tm.rename(columns={cols["event"]: "event_key"}, inplace=True)
-        else:
-            logger.warning("[track_meta] Missing 'event_key' column; running without track controls.")
-            _TRACK_META_CACHE = None
-            return None
-    else:
-        if cols["event_key"] != "event_key":
-            tm.rename(columns={cols["event_key"]: "event_key"}, inplace=True)
+    def _ren(old, new):
+        if old in cols and cols[old] != new:
+            tm.rename(columns={cols[old]: new}, inplace=True)
 
-    # Normalize expected columns if present
-    if "track_type" in cols and cols["track_type"] != "track_type":
-        tm.rename(columns={cols["track_type"]: "track_type"}, inplace=True)
-    if "downforce_index" in cols and cols["downforce_index"] != "downforce_index":
-        tm.rename(columns={cols["downforce_index"]: "downforce_index"}, inplace=True)
+    _ren("event_key", "event_key")
+    _ren("track_type", "track_type")
+    _ren("downforce_index", "downforce_index")
+    _ren("drs_zones", "drs_zones")
+    _ren("speed_bias", "speed_bias")
+    _ren("overtaking_difficulty", "overtaking_difficulty")
 
+    if "event_key" not in tm.columns:
+        logger.warning("[track_meta] Missing 'event_key' column; running without track controls.")
+        _TRACK_META_CACHE = None
+        return None
+
+    # Value normalization + helpful flags
+    tm["event_key"] = tm["event_key"].astype(str).str.strip()
+    tm["__ekey__"] = tm["event_key"].str.lower().str.strip()
     if "track_type" in tm.columns:
         tm["track_type"] = tm["track_type"].astype(str).str.strip().str.lower()
-
     if "downforce_index" in tm.columns:
-        tm["downforce_index"] = pd.to_numeric(tm["downforce_index"], errors="coerce").clip(lower=0.0, upper=1.0)
+        tm["downforce_index"] = pd.to_numeric(tm["downforce_index"], errors="coerce").clip(0.0, 1.0)
+    if "drs_zones" in tm.columns:
+        tm["drs_zones"] = pd.to_numeric(tm["drs_zones"], errors="coerce").astype("Int64")
+    if "speed_bias" in tm.columns:
+        tm["speed_bias"] = pd.to_numeric(tm["speed_bias"], errors="coerce")
+    if "overtaking_difficulty" in tm.columns:
+        tm["overtaking_difficulty"] = pd.to_numeric(tm["overtaking_difficulty"], errors="coerce").clip(0.0, 1.0)
 
     _TRACK_META_CACHE = tm
     logger.info("[track_meta] Loaded %d rows from %s", len(tm), f)
@@ -128,14 +139,16 @@ def _load_track_meta(cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
 
 
 def _event_key(year: Any, gp: Any) -> str:
+    # Back-compat display key (not used for matching)
     return f"{year} {gp}".strip()
 
 
 def _attach_event_track_tags(df: Optional[pd.DataFrame], event: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[pd.DataFrame]:
     """
-    If track_meta has a row for this event, attach constant columns:
-      track_type, downforce_index
-    Does nothing if metadata not found.
+    Attach track metadata columns to laps dataframe (no-op if metadata missing).
+    Columns attached when available:
+      - track_type, downforce_index
+      - drs_zones, speed_bias, overtaking_difficulty
     """
     if df is None or len(df) == 0:
         return df
@@ -144,26 +157,99 @@ def _attach_event_track_tags(df: Optional[pd.DataFrame], event: Dict[str, Any], 
     if tm is None or tm.empty:
         return df
 
-    key = _event_key(event.get("year"), event.get("gp"))
-    row = tm.loc[tm["event_key"].astype(str) == str(key)]
+    gp = str(event.get("gp", "")).lower().strip()
+    year = str(event.get("year", "")).strip()
+
+    # 1) Try direct/substring match against event_key
+    ekeys = tm["__ekey__"]
+    row = tm.loc[ekeys == gp]
     if row.empty:
-        logger.info("[track_meta] No metadata match for event_key='%s'", key)
+        row = tm.loc[ekeys.apply(lambda k: (k in gp) or (gp in k))]
+
+    # 2) Heuristic mapping from GP name to CSV key (handles Monza/Silverstone/etc.)
+    if row.empty:
+        gp_map = {
+            "british": "silverstone",
+            "silverstone": "silverstone",
+            "italian": "monza",
+            "monza": "monza",
+            "saudi": "jeddah",
+            "saudi arabian": "jeddah",
+            "jeddah": "jeddah",
+            "emilia": "imola",
+            "romagna": "imola",
+            "imola": "imola",
+            "azerbaijan": "baku",
+            "baku": "baku",
+            "united states": "usa_cota",
+            "austin": "usa_cota",
+            "cota": "usa_cota",
+            "brazil": "sao_paulo",
+            "são paulo": "sao_paulo",
+            "sao paulo": "sao_paulo",
+            "interlagos": "sao_paulo",
+            "mexico": "mexico",
+            "mexican": "mexico",
+            "qatar": "qatar",
+            "losail": "qatar",
+            "miami": "miami",
+            "las vegas": "vegas",
+            "vegas": "vegas",
+            "abu dhabi": "abu_dhabi",
+            "yas marina": "abu_dhabi",
+            "hungary": "hungary",
+            "hungarian": "hungary",
+            "spain": "spain",
+            "spanish": "spain",
+            "japan": "japan",
+            "japanese": "japan",
+            "australia": "australia",
+            "australian": "australia",
+            "austria": "austria",
+            "spielberg": "austria",
+            "red bull ring": "austria",
+            "canada": "canadian",
+            "canadian": "canadian",
+            "montreal": "canadian",
+            "china": "china",
+            "shanghai": "china",
+            "monaco": "monaco",
+            "belgian": "belgian",
+            "spa": "belgian",
+            "netherlands": "zandvoort",
+            "dutch": "zandvoort",
+            "zandvoort": "zandvoort",
+            "singapore": "singapore",
+            "barcelona": "spain",
+            "catalunya": "spain",
+        }
+        key = None
+        for k, v in gp_map.items():
+            if k in gp:
+                key = v
+                break
+        if key is not None:
+            row = tm.loc[ekeys == key]
+
+    # 3) Fallback to __default__
+    if row.empty:
+        row = tm.loc[ekeys == "__default__"]
+
+    if row.empty:
+        logger.info("[track_meta] No metadata match for gp='%s' (year=%s)", gp, year)
         return df
 
-    track_type = row.iloc[0]["track_type"] if "track_type" in row.columns else np.nan
-    downforce_index = row.iloc[0]["downforce_index"] if "downforce_index" in row.columns else np.nan
+    r0 = row.iloc[0]
+    attach_cols = ["track_type", "downforce_index", "drs_zones", "speed_bias", "overtaking_difficulty"]
 
     d2 = df.copy()
-    if "track_type" not in d2.columns:
-        d2["track_type"] = track_type
-    else:
-        d2["track_type"] = d2["track_type"].fillna(track_type)
-
-    if "downforce_index" not in d2.columns:
-        d2["downforce_index"] = downforce_index
-    else:
-        d2["downforce_index"] = pd.to_numeric(d2["downforce_index"], errors="coerce").fillna(downforce_index)
-
+    for c in attach_cols:
+        if c in tm.columns:
+            if c not in d2.columns:
+                d2[c] = r0.get(c)
+            else:
+                # fill only missing values if the column already exists
+                d2[c] = d2[c].where(d2[c].notna(), r0.get(c))
     return d2
 
 
@@ -195,7 +281,6 @@ def _append_track_controls_to_formula(base_formula: str, d: pd.DataFrame, cfg: D
     else:
         logger.info("[track_effects] Unknown mode '%s'; skipping", mode)
     return f
-
 
 # ============================================================
 # ========== Empirical Bayes shrinkage (smart target) ========

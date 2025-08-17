@@ -146,7 +146,7 @@ personality:
 
 # ===== Track effects & downforce controls (off by default) =====
 track_effects:
-  use: false
+  use: true
   mode: "archetype"   # "archetype" | "continuous"
 
 downforce_profile:

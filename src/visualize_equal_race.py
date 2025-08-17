@@ -44,6 +44,14 @@ DRS_MIN_ENABLE_LAP = 3
 DETECTION_OFFSET_FRACTION = 0.03
 
 # --- Calibrated degradation params loader & curve helper ---
+def _cfg_get(cfg: dict, path: List[str], default):
+    """Get nested config key; path is list of keys."""
+    d = cfg
+    for k in path:
+        if not isinstance(d, dict) or (k not in d):
+            return default
+        d = d[k]
+    return d
 
 def _load_degradation_params(cfg: dict) -> Optional[dict]:
     path = _cfg_get(cfg, ["paths", "degradation_params"], None)
@@ -57,7 +65,6 @@ def _load_degradation_params(cfg: dict) -> Optional[dict]:
             return json.load(fp)
     except Exception:
         return None
-
 
 def _curve_from_params(n_laps: int, params_obj: dict) -> np.ndarray:
     """Build cumulative degradation curve from {early_slope, late_slope, switch_lap}."""
@@ -93,16 +100,59 @@ SHOW_MARKER_LABELS = False
 RC_WRAP_WIDTH = 48
 DRS_TAG = "ⓓ"  # marks DRS on leaderboard gaps
 
-# ------------------- Utilities -------------------
-def _cfg_get(cfg: dict, path: List[str], default):
-    """Get nested config key; path is list of keys."""
-    d = cfg
-    for k in path:
-        if not isinstance(d, dict) or (k not in d):
-            return default
-        d = d[k]
-    return d
+# ------------------- Track meta helpers (NEW) -------------------
+def _norm_event_key_str(s: str) -> str:
+    if not isinstance(s, str):
+        return "unknown"
+    cleaned = "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in s)
+    return " ".join(cleaned.split())
 
+def _norm_event_key(year: Optional[int], gp: Optional[str]) -> str:
+    y = "" if pd.isna(year) else str(int(year))
+    g = "" if gp is None else str(gp)
+    return _norm_event_key_str(f"{y} {g}")
+
+def _load_viz_track_meta(cfg: dict) -> Optional[dict]:
+    """
+    Load data/track_meta.csv and extract metadata for the viz target in cfg['viz_track'].
+    Expected columns: event_key or (year,gp), plus:
+      track_type, downforce_index, drs_zones, speed_bias, overtaking_difficulty
+    Returns a dict or None if not available.
+    """
+    meta_path = _cfg_get(cfg, ["paths", "track_meta"], "data/track_meta.csv")
+    f = (PROJ / meta_path).resolve()
+    if not f.exists():
+        return None
+    try:
+        meta = pd.read_csv(f)
+    except Exception:
+        return None
+
+    cols = {c.lower(): c for c in meta.columns}
+    if "event_key" in cols:
+        meta["event_key_norm"] = meta[cols["event_key"]].map(_norm_event_key_str)
+    elif "year" in cols and "gp" in cols:
+        meta["event_key_norm"] = meta.apply(lambda r: _norm_event_key(r[cols["year"]], r[cols["gp"]]), axis=1)
+    else:
+        return None
+
+    vt = _cfg_get(cfg, ["viz_track"], {}) or {}
+    target_key = _norm_event_key(vt.get("year"), vt.get("grand_prix"))
+    row = meta.loc[meta["event_key_norm"] == target_key]
+    if row.empty:
+        return None
+
+    r0 = row.iloc[0]
+    out = {
+        "track_type": str(r0.get(cols.get("track_type", "track_type"), "")).strip().lower() or None,
+        "downforce_index": pd.to_numeric(r0.get(cols.get("downforce_index", "downforce_index"), np.nan), errors="coerce"),
+        "drs_zones": int(pd.to_numeric(r0.get(cols.get("drs_zones", "drs_zones"), np.nan), errors="coerce")) if not pd.isna(r0.get(cols.get("drs_zones", "drs_zones"), np.nan)) else None,
+        "speed_bias": pd.to_numeric(r0.get(cols.get("speed_bias", "speed_bias"), np.nan), errors="coerce"),
+        "overtaking_difficulty": pd.to_numeric(r0.get(cols.get("overtaking_difficulty", "overtaking_difficulty"), np.nan), errors="coerce"),
+    }
+    return out
+
+# ------------------- Utilities -------------------
 def _darken_hex(hex_color: str, factor: float = 0.75) -> str:
     hex_color = hex_color.lstrip("#")
     r = int(hex_color[0:2], 16); g = int(hex_color[2:4], 16); b = int(hex_color[4:6], 16)
@@ -215,7 +265,6 @@ def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[st
     if not all(k in low for k in req):
         return {}
 
-    # normalize to [0,1] & clamp; missing -> 0.5
     def _clamp01(s):
         return pd.to_numeric(s, errors="coerce").clip(0.0, 1.0)
 
@@ -230,7 +279,6 @@ def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[st
             "defence_se":   float(pd.to_numeric(r.get(low.get("defence_se",""),   np.nan), errors="coerce")) if "defence_se" in low else np.nan,
             "risk_se":      float(pd.to_numeric(r.get(low.get("risk_se",""),      np.nan), errors="coerce")) if "risk_se" in low else np.nan,
         }
-    # ensure all current drivers are present
     for d in drivers:
         out.setdefault(d, {"aggression":0.5,"defence":0.5,"risk":0.5,"aggression_se":np.nan,"defence_se":np.nan,"risk_se":np.nan})
     return out
@@ -310,7 +358,6 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     low = {c.lower(): c for c in df.columns}
     drv = low.get("driver", list(df.columns)[0])
 
-    # Best available event-level delta
     evt = low.get("event_delta_s_shrunk") or low.get("event_delta_s")
     if evt:
         out = df[[drv, evt]].copy()
@@ -319,7 +366,6 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
         out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
         return out.dropna(subset=["agg_delta_s"])
 
-    # Fallback: combine race+quali using config weights
     rcol = low.get("race_delta_s"); qcol = low.get("quali_delta_s")
     if drv is None or rcol is None:
         return None
@@ -348,14 +394,15 @@ def _current_gp_name(cfg: dict) -> str:
     except Exception:
         return ""
 
-def _track_type_from_cfg(cfg: dict) -> str:
-    # Optional: user can define viz_track.track_type ("street","permanent","high_deg","low_deg")
+def _track_type_from_cfg(cfg: dict, meta: Optional[dict] = None) -> str:
+    # Prefer metadata if available
+    if meta and isinstance(meta.get("track_type", None), str) and meta["track_type"]:
+        return str(meta["track_type"]).lower()
     tt = _cfg_get(cfg, ["viz_track", "track_type"], None)
     if isinstance(tt, str) and tt:
         return tt.lower()
-    # Heuristic: street if name hints
     gp = _current_gp_name(cfg).lower()
-    if any(k in gp for k in ["monaco", "singapore", "miami", "jeddah", "baku", "vegas", "vegas", "montr", "canadian"]):
+    if any(k in gp for k in ["monaco", "singapore", "miami", "jeddah", "baku", "vegas", "montr", "canadian"]):
         return "street"
     return "permanent"
 
@@ -409,7 +456,6 @@ def per_lap_dnf_probability(cfg: dict, n_laps: int, risk_vec: Optional[np.ndarra
         return np.array([float(np.clip(p_pl, 0.0, 1.0))], dtype=float)
 
     amp = float(_cfg_get(cfg, ["personality", "risk_weight"], 1.0))
-    # multiplier ≈ [0.5, 1.5] when amp=1
     mult = 1.0 + amp * (np.asarray(risk_vec, dtype=float) - 0.5)
     mult = np.clip(mult, 0.5, 1.5)
     p_race = np.clip(base * mult, 0.0, 0.9)
@@ -443,7 +489,7 @@ def _deg_params_for(compound: str, cfg: dict, track_type: str) -> Tuple[float, f
     track_mult = float(mults.get(track_type, 1.0))
     return e, l, sw, track_mult
 
-def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np.random.Generator) -> np.ndarray:
+def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np.random.Generator, meta: Optional[dict] = None) -> np.ndarray:
     """
     Return (n_laps, D) additive degradation in seconds per car.
 
@@ -455,13 +501,11 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
                     degradation.compound_scale if present.
     """
     D = len(drivers)
-    track_type = _track_type_from_cfg(cfg).lower()
+    track_type = _track_type_from_cfg(cfg, meta=meta).lower()
 
-    # Choose compound per driver
     compounds = _compound_for_all(cfg, rng, D)
     source = str(_cfg_get(cfg, ["degradation", "source"], "linear")).lower()
 
-    # Optional overall multipliers per compound
     scale_block = _cfg_get(cfg, ["degradation", "compound_scale"], {}) or {}
     def _scale_for(c: str) -> float:
         return float(scale_block.get(str(c).upper(), 1.0))
@@ -476,7 +520,6 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
 
             for j in range(D):
                 c = str(compounds[j]).upper()
-                # prefer per-track-type if available; else global
                 pobj = None
                 if track_type and track_type in by_tt:
                     pobj = (by_tt.get(track_type) or {}).get(c)
@@ -487,15 +530,11 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
                     curve = _curve_from_params(n_laps, pobj)
                     out[:, j] = _scale_for(c) * curve
                 else:
-                    # fallback to config piecewise for this compound if missing
                     e, l, sw, _ = _deg_params_for(c, cfg, track_type)
                     t = np.arange(n_laps, dtype=float)
                     out[:, j] = _scale_for(c) * (np.minimum(t, sw) * e + np.maximum(t - sw, 0.0) * l)
             return out
 
-        # If params missing/unreadable, fall back to config behavior below.
-
-    # ----- Default/config behavior (linear/piecewise + track multipliers) -----
     lap_idx = np.arange(n_laps, dtype=float)[:, None]  # (L,1)
     for j in range(D):
         c = str(compounds[j]).upper()
@@ -505,9 +544,8 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
         out[:, j] = _scale_for(c) * mult * (early + late).ravel()
     return out
 
-
-# ------------------- Overtaking params from config (+ track overrides) -------------------
-def get_overtake_params(cfg: dict) -> Dict[str, float]:
+# ------------------- Overtaking params from config (+ track overrides & META) -------------------
+def get_overtake_params(cfg: dict, meta: Optional[dict] = None) -> Dict[str, float]:
     base = {
         "alpha_pace": float(_cfg_get(cfg, ["overtaking", "alpha_pace"], OVERTAKE_ALPHA_PACE)),
         "beta_drs": float(_cfg_get(cfg, ["overtaking", "beta_drs"], OVERTAKE_BETA_DRS)),
@@ -518,8 +556,20 @@ def get_overtake_params(cfg: dict) -> Dict[str, float]:
         "drs_min_enable_lap": int(_cfg_get(cfg, ["overtaking", "drs_min_enable_lap"], DRS_MIN_ENABLE_LAP)),
         "drs_cooldown_after_sc_laps": int(_cfg_get(cfg, ["overtaking", "drs_cooldown_after_sc_laps"], DRS_COOLDOWN_AFTER_SC_LAPS)),
     }
-    # track overrides by substring match
-    return _apply_track_overrides(base, cfg)
+    # YAML string overrides via substring match
+    base = _apply_track_overrides(base, cfg)
+
+    # Metadata-driven tweaks (optional)
+    if meta:
+        # Increase dirty-air penalty with overtaking difficulty (0..1) and slightly with downforce
+        diff = meta.get("overtaking_difficulty")
+        if pd.notna(diff):
+            scale = float(np.clip(0.8 + 1.2 * float(diff), 0.5, 2.0))  # 0.8x .. 2.0x
+            base["dirty_air_penalty"] = float(np.clip(base["dirty_air_penalty"] * scale, 0.03, 0.60))
+        dfi = meta.get("downforce_index")
+        if pd.notna(dfi):
+            base["dirty_air_penalty"] = float(np.clip(base["dirty_air_penalty"] * (0.9 + 0.3 * float(dfi)), 0.03, 0.60))
+    return base
 
 # ------------------- Simulation -------------------
 def simulate_progress(
@@ -531,36 +581,52 @@ def simulate_progress(
     noise_sd: float,
     seed: int,
     cfg: Optional[dict] = None,
+    meta: Optional[dict] = None,
 ):
     if cfg is None:
         cfg = {}
     rng = np.random.default_rng(seed)
 
-    # --- Drivers & deltas (NEED these before personality) ---
+    # --- Meta pace bias (small) ---
+    base_lap_eff = float(base_lap)
+    if meta and pd.notna(meta.get("speed_bias", np.nan)):
+        # Interpret +speed_bias as faster track -> slightly shorter base lap
+        sb = float(np.clip(meta["speed_bias"], -1.5, 1.5))
+        base_lap_eff *= (1.0 - 0.06 * sb)  # cap ~±9% within range [-1.5,1.5]
+
+    # --- Drivers & deltas ---
     drivers = ranking["driver"].astype(str).tolist()
     deltas = pd.to_numeric(ranking["agg_delta_s"], errors="coerce").to_numpy(dtype=float)
     D = len(drivers)
-
     P = xy_path.shape[0]
 
-    # --- Overtake/DRS params ---
-    otk = get_overtake_params(cfg)
+    # --- Overtake/DRS params (+ meta) ---
+    otk = get_overtake_params(cfg, meta=meta)
     global DRS_MIN_ENABLE_LAP, DRS_COOLDOWN_AFTER_SC_LAPS, DETECTION_OFFSET_FRACTION
     DRS_MIN_ENABLE_LAP = int(otk["drs_min_enable_lap"])
     DRS_COOLDOWN_AFTER_SC_LAPS = int(otk["drs_cooldown_after_sc_laps"])
     DETECTION_OFFSET_FRACTION = float(otk["detection_offset_fraction"])
+
+    # Detect DRS zones from geometry, then optionally truncate to metadata count
     zones = _find_drs_zones(xy_path)
+    if meta and isinstance(meta.get("drs_zones", None), (int, np.integer)) and meta["drs_zones"] is not None:
+        K = int(max(0, meta["drs_zones"]))
+        if K >= 0:
+            zones = zones[:K]  # take longest K zones (0 -> none)
+
     det_eff = float(otk["drs_detect_thresh_s"])
 
-    # Scale alpha by length of strongest DRS zone (like before)
+    # Scale alpha by length of strongest DRS zone (existing) + count of zones (meta-aware)
     def _seg_len(a, b): return (b - a + 1) if a <= b else (P - a) + (b + 1)
     longest = max((_seg_len(a, b) for (a, b, _) in zones), default=int(0.12 * P))
     frac = longest / float(P)
     baseline = 0.12
-    scale = max(0.6, min(2.0, 1.0 + 1.5 * (frac - baseline)))
-    alpha_eff = float(otk["alpha_pace"]) * scale
+    length_scale = max(0.6, min(2.0, 1.0 + 1.5 * (frac - baseline)))
+    count_scale = 1.0 + 0.18 * max(0, (len(zones) - 1))  # +18% per extra zone
+    count_scale = float(np.clip(count_scale, 0.7, 1.9))
+    alpha_eff = float(otk["alpha_pace"]) * length_scale * count_scale
 
-    # --- Personality vectors (load AFTER drivers are known) ---
+    # --- Personality vectors ---
     use_personality = bool(_cfg_get(cfg, ["personality", "use"], False))
     if use_personality:
         pers = _load_personality_scores(cfg, drivers)
@@ -573,13 +639,12 @@ def simulate_progress(
 
     agg_w  = float(_cfg_get(cfg, ["personality", "agg_weight"], 1.0))
     def_w  = float(_cfg_get(cfg, ["personality", "def_weight"], 1.0))
-    # risk_weight used inside per_lap_dnf_probability via cfg
 
     # Base lap + driver deltas + jitter
-    base_driver = base_lap + deltas + rng.normal(0.0, noise_sd, size=D)
+    base_driver = base_lap_eff + deltas + rng.normal(0.0, noise_sd, size=D)
 
-    # Degradation matrix (compound & track-type aware)
-    degrade = build_degradation_matrix(cfg, n_laps, drivers, rng)  # (L, D)
+    # Degradation matrix (compound & track-type aware; meta track_type preferred)
+    degrade = build_degradation_matrix(cfg, n_laps, drivers, rng, meta=meta)  # (L, D)
 
     # Random lap noise
     eps_lap = rng.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
@@ -654,7 +719,7 @@ def simulate_progress(
         L = min(curr_lap[i_follow], n_laps - 1)
         pace_lead = lap_times[L, i_lead]
         pace_foll = lap_times[L, i_follow]
-        delta_norm = (pace_lead - pace_foll) / base_lap
+        delta_norm = (pace_lead - pace_foll) / base_lap_eff
         slip = DRS_SLIPSTREAM_BONUS if gap_at_det_s <= (det_eff * 1.2) else 0.0
         defended = 1.0 if defended_this_lap[i_lead] else 0.0
 
@@ -676,7 +741,7 @@ def simulate_progress(
 
     sim_time = 0.0
     max_time = n_laps * float(np.max(lap_times))
-    T_max = int(math.ceil(max_time / DT)) + 1
+    T_max = int(math.ceil(max_time / dt)) + 1  # use dt (arg), not DT (module)
 
     for _ in range(T_max):
         # base speeds
@@ -689,23 +754,21 @@ def simulate_progress(
             speeds[active] = base_speed[active] * phase_factor
 
         last_pts = curr_pts.copy()
-        curr_pts[active] = (curr_pts[active] + speeds[active] * DT) % P
+        curr_pts[active] = (curr_pts[active] + speeds[active] * dt) % P
 
         # Lap crossings
         crossed = (curr_pts < last_pts) & active
         if crossed.any():
             curr_lap[crossed] += 1
             defended_this_lap[crossed] = False
-            # clear any pending DRS entries for those drivers
             for z in drs_eligible.values():
                 for di in list(z.keys()):
                     if crossed[di]:
                         z.pop(di, None)
-            # Reliability checks on lap complete (per car)
             indices = np.where(crossed)[0]
             for di in indices:
                 if rng.random() < float(p_dnf_per_lap_vec[di]):
-                    curr_lap[di] = n_laps  # retire immediately
+                    curr_lap[di] = n_laps
                     speeds[di] = 0.0
                     _log(f"DNF: {drivers[di]}", sim_time)
 
@@ -730,7 +793,7 @@ def simulate_progress(
             else:
                 phase = "VSC"
                 vsec = float(rng.uniform(VSC_DURATION_SEC_MINMAX[0], VSC_DURATION_SEC_MINMAX[1]))
-                vsc_ticks_remaining = max(1, int(vsec / DT))
+                vsc_ticks_remaining = max(1, int(vsec / dt))
                 _log("VIRTUAL SAFETY CAR DEPLOYED", sim_time)
 
         if phase == "VSC":
@@ -834,7 +897,7 @@ def simulate_progress(
         wrapped = [_wrap_line(r, width=RC_WRAP_WIDTH) for r in recent[-12:]]
         rc_texts.append(wrapped if wrapped else ["—"])
 
-        sim_time += DT
+        sim_time += dt
         if (curr_lap >= n_laps).all():
             break
 
@@ -865,7 +928,6 @@ def build_animation(
     names = [name_map.get(dr, dr) for dr in drivers]
     colors = [color_map.get(dr, "#888888") for dr in drivers]
 
-    # 2×2 layout; left col spans both rows for the TRACK.
     fig = make_subplots(
         rows=2, cols=2,
         specs=[[{"type": "xy", "rowspan": 2}, {"type": "table"}],
@@ -877,31 +939,26 @@ def build_animation(
         subplot_titles=("Equal-Car Replay", "Leaderboard (live)", "Race Control"),
     )
 
-    # TRACK (trace 0)
     track_col0 = _track_color(phase_flags[0] if len(phase_flags) else "GREEN")
     fig.add_trace(go.Scatter(x=xy_path[:,0], y=xy_path[:,1], mode="lines",
                              line=dict(width=2, color=track_col0),
                              hoverinfo="skip", showlegend=False, name="Track"), row=1, col=1)
 
-    # CARS (trace 1)
     mode0 = "markers+text" if SHOW_MARKER_LABELS else "markers"
     fig.add_trace(go.Scatter(x=positions[0,:,0], y=positions[0,:,1], mode=mode0,
                              text=(labels if SHOW_MARKER_LABELS else None), textposition="top center",
                              marker=dict(size=12, line=dict(width=1, color="#222"), color=colors),
                              hovertext=names, hoverinfo="text", showlegend=True, name="Cars"), row=1, col=1)
 
-    # SC marker placeholder (trace 2)
     fig.add_trace(go.Scatter(), row=1, col=1)
 
-    # Legend entries (trace 3..2+D)
     for nm, col in zip(names, colors):
         fig.add_trace(go.Scatter(x=[None], y=[None], mode="markers",
                                  marker=dict(size=12, color=col, line=dict(width=1, color="#222")),
                                  name=nm, showlegend=True), row=1, col=1)
 
-    # Leaderboard table (trace 3+D)
     order0 = orders[0]
-    table_positions = list(range(1, D+1))
+    table_positions = list(range(1, len(drivers)+1))
     table_drivers = [labels[i] for i in order0]
     table_gaps = gaps_panel[0]
     leaderboard = go.Table(
@@ -914,7 +971,6 @@ def build_animation(
     )
     fig.add_trace(leaderboard, row=1, col=2)
 
-    # Race Control table (trace 4+D)
     rc0_lines = rc_texts[0] if len(rc_texts) else ["—"]
     rc_table = go.Table(
         columnwidth=[1.0],
@@ -926,7 +982,6 @@ def build_animation(
     )
     fig.add_trace(rc_table, row=2, col=2)
 
-    # DRS zones & detection markers (static overlays)
     for (zs, ze, zd) in zones:
         fig.add_trace(go.Scatter(x=[xy_path[zd,0]], y=[xy_path[zd,1]], mode="markers",
                                  marker=dict(size=8, symbol="triangle-up", color="rgba(30,144,255,0.95)"),
@@ -939,10 +994,7 @@ def build_animation(
         fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines",
                                  line=dict(width=6, color="rgba(30,144,255,0.18)"),
                                  showlegend=False, name="DRS zone"), row=1, col=1)
-    # initial lap label for the static (first) frame
-    initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
 
-    # Axes/layout
     pad = 0.08
     x_all = positions[:,:,0].ravel(); y_all = positions[:,:,1].ravel()
     xmin, xmax = float(x_all.min())-pad, float(x_all.max())+pad
@@ -955,14 +1007,13 @@ def build_animation(
     fig.update_xaxes(showticklabels=False, row=2, col=2)
     fig.update_yaxes(showticklabels=False, row=2, col=2)
 
-    # Playback buttons
     def _btn(speed: float, label: str):
         frame_ms = max(5, int(1000 * DT / speed))
         return dict(label=label, method="animate",
                     args=[None, {"fromcurrent": True,
                                  "frame": {"duration": frame_ms, "redraw": True},
                                  "transition": {"duration": 0}}])
-    buttons = [_btn(s, f"Play {int(s)}×") for s in PLAYBACK_CHOICES]
+    buttons = [_btn(s, f"Play {int(s)}×") for s in [5.0,10.0,20.0,100.0]]
     buttons.append(dict(label="Pause", method="animate",
                         args=[[None], {"mode": "immediate",
                                        "frame": {"duration": 0, "redraw": False},
@@ -970,7 +1021,6 @@ def build_animation(
 
     banner_text, banner_bg = _flag_style(phase_flags[0] if len(phase_flags) else "GREEN")
     drs_tag = drs_banner[0] if len(drs_banner) else "DRS DISABLED"
-    # initial lap label for the static (first) frame
     initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
 
     fig.update_layout(
@@ -991,17 +1041,14 @@ def build_animation(
         paper_bgcolor="#f2f6fb"
     )
 
-    # Frames
     frames = []
-    for ti in range(T):
+    for ti in range(positions.shape[0]):
         order = orders[ti]
-        table_positions = list(range(1, D + 1))
+        table_positions = list(range(1, len(drivers) + 1))
         table_drivers = [labels[i] for i in order]
         table_gaps = gaps_panel[ti]
 
-        # use the function arg n_laps (not the module constant N_LAPS)
         lap_disp = int(np.clip(leader_lap[ti], 1, n_laps))
-
         banner_text, banner_bg = _flag_style(phase_flags[ti])
         track_col = _track_color(phase_flags[ti])
         sc_marker = (
@@ -1019,83 +1066,46 @@ def build_animation(
         rc_lines = rc_texts[ti]
 
         frame_data = [
-                         go.Scatter(x=xy_path[:, 0], y=xy_path[:, 1], line=dict(width=2, color=track_col)),
-                         go.Scatter(
-                             x=positions[ti, :, 0],
-                             y=positions[ti, :, 1],
-                             mode=("markers+text" if SHOW_MARKER_LABELS else "markers"),
-                             text=(labels if SHOW_MARKER_LABELS else None),
-                         ),
-                         sc_marker,
-                     ] + [go.Scatter() for _ in range(D)] + [
-                         go.Table(
-                             columnwidth=[0.22, 0.38, 0.40],
-                             header=dict(
-                                 values=["<b>Position</b>", "<b>Driver</b>", "<b>Time</b>"],
-                                 fill_color="#2b2f3a",
-                                 font=dict(color="white", size=13),
-                                 align="left",
-                             ),
-                             cells=dict(
-                                 values=[table_positions, table_drivers, table_gaps],
-                                 fill_color="#0f1720",
-                                 font=dict(color="white", size=12),
-                                 align="left",
-                                 height=22,
-                             ),
-                         ),
-                         go.Table(
-                             columnwidth=[1.0],
-                             header=dict(
-                                 values=["<b>Race Control</b>"],
-                                 fill_color="#2b2f3a",
-                                 font=dict(color="white", size=13),
-                                 align="left",
-                             ),
-                             cells=dict(
-                                 values=[rc_lines],
-                                 fill_color="#0f1720",
-                                 font=dict(color="white", size=12),
-                                 align="left",
-                                 height=22,
-                             ),
-                         ),
-                     ]
+            go.Scatter(x=xy_path[:, 0], y=xy_path[:, 1], line=dict(width=2, color=track_col)),
+            go.Scatter(
+                x=positions[ti, :, 0],
+                y=positions[ti, :, 1],
+                mode=("markers+text" if SHOW_MARKER_LABELS else "markers"),
+                text=(labels if SHOW_MARKER_LABELS else None),
+            ),
+            sc_marker,
+        ] + [go.Scatter() for _ in range(len(drivers))] + [
+            go.Table(
+                columnwidth=[0.22, 0.38, 0.40],
+                header=dict(values=["<b>Position</b>", "<b>Driver</b>", "<b>Time</b>"],
+                            fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
+                cells=dict(values=[table_positions, table_drivers, table_gaps],
+                           fill_color="#0f1720", font=dict(color="white", size=12),
+                           align="left", height=22),
+            ),
+            go.Table(
+                columnwidth=[1.0],
+                header=dict(values=["<b>Race Control</b>"],
+                            fill_color="#2b2f3a", font=dict(color="white", size=13), align="left"),
+                cells=dict(values=[rc_lines],
+                           fill_color="#0f1720", font=dict(color="white", size=12),
+                           align="left", height=22),
+            ),
+        ]
 
         frames.append(
             go.Frame(
                 data=frame_data,
                 layout=go.Layout(
                     annotations=[
-                        dict(
-                            text=f"Lap {lap_disp} / {n_laps}",
-                            showarrow=False,
-                            x=0.21,
-                            y=1.17,
-                            xref="paper",
-                            yref="paper",
-                            font=dict(size=14, color="#1f2d3d"),
-                        ),
-                        dict(
-                            text=banner_text,
-                            showarrow=False,
-                            x=0.50,
-                            y=1.17,
-                            xref="paper",
-                            yref="paper",
-                            font=dict(size=14, color="#1f2d3d"),
-                            bgcolor=banner_bg,
-                        ),
-                        dict(
-                            text=("DRS ENABLED" if "ENABLED" in drs_banner[ti] else "DRS DISABLED"),
-                            showarrow=False,
-                            x=0.78,
-                            y=1.17,
-                            xref="paper",
-                            yref="paper",
-                            font=dict(size=14, color="#1f2d3d"),
-                            bgcolor="#e8f1ff" if ("ENABLED" in drs_banner[ti]) else "#ffd6d6",
-                        ),
+                        dict(text=f"Lap {lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
+                             font=dict(size=14, color="#1f2d3d")),
+                        dict(text=banner_text, showarrow=False, x=0.50, y=1.17, xref="paper", yref="paper",
+                             font=dict(size=14, color="#1f2d3d"), bgcolor=banner_bg),
+                        dict(text=("DRS ENABLED" if "ENABLED" in drs_banner[ti] else "DRS DISABLED"),
+                             showarrow=False, x=0.78, y=1.17, xref="paper", yref="paper",
+                             font=dict(size=14, color="#1f2d3d"),
+                             bgcolor="#e8f1ff" if ("ENABLED" in drs_banner[ti]) else "#ffd6d6"),
                     ]
                 ),
                 name=str(ti),
@@ -1122,6 +1132,10 @@ def main():
     dt = float(_cfg_get(vizsec, ["dt"], DT))
     noise_sd = float(_cfg_get(vizsec, ["lap_jitter_sd"], LAP_JITTER_SD))
 
+    # Track metadata (optional)
+    meta = _load_viz_track_meta(cfg)
+
+    # Deltas: event-specific or global
     if use_evt:
         ranking = load_driver_ranking_event(cfg, gp_sub.lower())
         if ranking is None or ranking.empty:
@@ -1141,7 +1155,7 @@ def main():
      phase_flags, rc_texts, drs_on, drs_banner,
      orders, gaps_panel, zones, alpha_eff, det_eff) = simulate_progress(
         ranking, xy, base_lap=base_lap, n_laps=n_laps, dt=dt,
-        noise_sd=noise_sd, seed=RANDOM_SEED, cfg=cfg
+        noise_sd=noise_sd, seed=RANDOM_SEED, cfg=cfg, meta=meta
     )
 
     fig = build_animation(
