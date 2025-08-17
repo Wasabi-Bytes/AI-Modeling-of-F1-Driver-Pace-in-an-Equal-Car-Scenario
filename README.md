@@ -1,112 +1,102 @@
-# AI Modeling of F1 Driver Pace in an Equal-Car Scenario
+# Equal-Car F1 Driver Pace Modeling
 
-This project estimates Formula 1 drivers’ **true pace** by removing constructor advantages.  
-We simulate races as if all drivers competed in identical machinery.
+**What if every F1 driver raced in the same car?**  
+This project estimates their **true pace** by stripping away constructor advantage.  
+We model driver performance relative to teammates, aggregate across races, and simulate equal-car outcomes.
 
 ---
 
-## Overview
-
-- **Goal**: Isolate driver skill from car/team effects.  
-- **Method**: Normalize lap times, compare teammates, and aggregate across recent events with statistical shrinkage.  
+## Scope & Goals
+- **Objective**: Measure each driver’s underlying pace, independent of car/team effects.  
+- **Data**: Last 10–12 Grands Prix, weighted by exponential recency decay (≈0.92).  
+- **Sessions**: Race (R) and Qualifying (Q).  
 - **Outputs**:
-  - Equal-car driver ranking (with uncertainty)
-  - Interactive race replay animation (Montreal circuit)
-  - Monte Carlo season simulations with championship odds
-  - Per-event breakdown tables
+  - Equal-car driver ranking (with uncertainties)  
+  - Per-event breakdown tables  
+  - Montreal equal-start race animation  
+  - Monte Carlo season outcomes (champion odds, win distributions)  
 
 ---
 
 ## Pipeline
 
-### 1. Data Loading
-- Source: [FastF1](https://theoehrly.github.io/Fast-F1/) telemetry and session data  
-- Sessions: Race (R) and Qualifying (Q)  
-- Recent races: last 10–12 Grands Prix, weighted by exponential recency decay (default ≈ 0.92)  
+### 1. Data Loading & Tagging (`load_data.py`)
+- Source: [FastF1](https://theoehrly.github.io/Fast-F1/) telemetry & session data.  
+- Tags each lap with driver, compound, stint, lap number, lap_on_tyre counter.  
+- Infers stints when missing (using pit in/out flags).  
 
-### 2. Cleaning
-- Keep only valid laps (exclude pit in/out, SC/VSC/RED flag laps)  
-- Bound lap times to [60s, 180s]  
-- Trim per-driver to 5th–95th percentile  
-- Diagnostics: sample size per driver/event  
+---
 
-### 3. Event Metrics
+### 2. Race Metrics (`model_metrics.py`)
+Two modeling options (chosen in `config.yaml`):  
 
-#### Race Pace Models
-**Option A — OLS Regression (team-controlled)**  
+**a. Correction-Factor Model (`race_metrics_corrections_team`)**  
+- Regress lap time on tyre compound, tyre age, lap number.  
+- Subtract fitted effects to normalise laps.  
+- Demean within team → driver’s residual pace delta.  
+- SE estimated from residual variance.  
 
-\[
-LapTime_{it} = \alpha + \beta_{\text{team}(i)} + \delta_{\text{driver}(i)} + f(compound) + g(lap\_on\_tyre) + h(lap\_number) + \varepsilon_{it}
-\]
+**b. OLS Team Model (`race_metrics_ols_team`)**  
+- Build design: `team` + `driver@team` + lap controls.  
+- Fit OLS regression of lap time on team + driver-within-team.  
+- Predict reference laps to compute deltas.  
+- SEs from regression residuals.  
 
-**Option B — Correction-Factor Model**  
+---
 
-\[
-norm\_time = raw - \theta_{compound} - \beta f(lap\_on\_tyre) - \gamma g(lap\_number)
-\]  
+### 3. Qualifying Metrics
+- Keep top-k laps per driver/session.  
+- Take best lap in Q1, Q2, Q3.  
+- Subtract teammate’s best lap in same session.  
+- Average across sessions → driver’s quali delta.  
+- SE = variance of gaps / √k.  
 
-Subtract team mean → driver’s relative pace.  
-Uncertainty from residual variance.  
+---
 
-#### Qualifying Pace
-- Select best valid lap(s) per Q1/Q2/Q3  
-- Normalize by teammate’s best lap  
-- Average across sessions  
-- Uncertainty = variance / √k  
-
-### 4. Event Combination
-Weighted average of race and quali metrics:  
-
+### 4. Event-Level Combination
 \[
 \Delta_{event} = w_R \cdot \Delta_{race} + w_Q \cdot \Delta_{quali}
-\]
-
-Default: \(w_R = 0.6, \, w_Q = 0.4\).  
-Event uncertainty combines both SEs.  
-
-### 5. Cross-Event Aggregation
-- Inverse-variance weighting across events  
-- Exponential recency decay (default = 0.92)  
-- Shrinkage (Empirical-Bayes) to stabilize small-sample drivers  
-
-**Outputs**:  
-- `driver_ranking.csv` (aggregated deltas and uncertainties)  
-- `event_breakdown.csv` (per-event statistics)  
+\]  
+- Defaults: \(w_R = 0.6, w_Q = 0.4\).  
+- Missing values fall back to whichever delta is available.  
+- Empirical-Bayes shrinkage pulls small-sample drivers toward “average teammate.”  
 
 ---
 
-## Equal-Car Race Simulation
-
-### Lap Model
-\[
-t_{driver, lap} = BASE\_LAP + \Delta_{driver} + \varepsilon, 
-\quad \varepsilon \sim \mathcal{N}(0, \sigma^2)
-\]
-
-### Race Dynamics
-- Overtakes: logistic probability model based on pace gap, DRS, slipstream  
-- DNFs: fixed per-lap probability (~4%)  
-- No team/engine effects — pure driver skill  
-
-**Output**: `simulation.html` interactive Montreal replay  
+### 5. Cross-Event Aggregation (`aggregate_metrics.py`)
+- Inverse-variance weighting × recency decay:  
+  \[
+  w = \frac{(decay)^{events\_ago}}{SE^2}
+  \]  
+- Aggregated delta = weighted mean.  
+- Aggregated SE = \(\sqrt{1 / \sum w}\).  
+- Outputs:
+  - `driver_ranking.csv`  
+  - `event_breakdown.csv`  
 
 ---
 
-## Monte Carlo Season Simulator
+### 6. Equal-Car Simulation (`visualize_equal_race.py`)
+- Base lap time + driver delta + noise.  
+- Linear tyre degradation term per lap.  
+- Logistic overtaking probability based on pace gap, DRS, defence.  
+- Random DNFs with fixed per-lap probability (~4%).  
+- Output: `simulation.html` interactive replay (Montreal circuit).  
 
-- Simulates 24 races × 5000 iterations  
-- Driver pace ~ Normal(agg_delta, agg_se)  
-- Adds stochastic noise and DNF risk  
-- Assigns F1 points per FIA system  
+---
 
-**Outputs**:  
-- `championship_mc_drivers.csv` (points, champ %, top-3 %, wins)  
-- `championship_mc_constructors.csv`  
+### 7. Monte Carlo Season Simulator
+- Simulates 24 races × 5000 seasons.  
+- Each driver’s pace ~ Normal(agg_delta, agg_se).  
+- Adds noise + DNF risk.  
+- Assigns FIA points.  
+- Outputs:  
+  - `championship_mc_drivers.csv` (points, champ %, top-3 %, wins)  
+  - `championship_mc_constructors.csv`  
 
 ---
 
 ## Deliverables
-
 **Tables**  
 - `driver_ranking.csv`  
 - `event_breakdown.csv`  
@@ -114,48 +104,32 @@ t_{driver, lap} = BASE\_LAP + \Delta_{driver} + \varepsilon,
 - `championship_mc_constructors.csv`  
 
 **Visuals**  
-- `simulation.html` (equal-car race animation)  
-- Diagnostic plots  
+- `simulation.html` (equal-car race replay)  
+- Diagnostics & plots  
 
-**Documentation**  
-- README with assumptions and limitations  
+**Narrative**  
+- This README (assumptions, limitations, interpretation)  
 
 ---
 
-## Limitations & Future Work
+## Limitations & Extensions
+**Simplifications**  
+- No pit stops or tyre strategy  
+- No weather or track evolution  
+- DNFs uniform across teams  
+- Safety cars, penalties, sprints excluded  
 
-### Current Simplifications
-- No pit strategy modeling  
-- No weather effects  
-- No stochastic SC/VSC/penalties  
-- Sprint weekends not modeled  
-
-### Potential Extensions
-- Track-type specific effects  
+**Planned Extensions**  
+- Track-type effects  
+- Tyre-specific degradation curves  
 - Hierarchical Bayesian shrinkage  
-- Overtaking model calibration to history  
-- Pit window and tyre degradation strategy  
-- Safety car and incident simulations  
+- Pit strategy modeling  
+- Calibrated overtaking model & safety-car logic  
+- Driver “personality” parameters (aggression, defence, risk)  
 
 ---
 
-## Project Logic (Code Flow)
-
-1. **Data loading/tagging** (`load_data.py`)  
-   - Loads races via FastF1, tags compound, stint, tyre age  
-
-2. **Race metrics** (`model_metrics.py`)  
-   - OLS team model  
-   - Correction-factor model  
-
-3. **Qualifying metrics**  
-   - Best laps per Q session, normalized vs teammate  
-
-4. **Event-level aggregation**  
-   - Weighted race + quali, empirical-Bayes shrinkage  
-
-5. **Cross-event aggregation** (`aggregate_metrics.py`)  
-   - Inverse-variance + recency weighting  
-
-6. **Equal-car simulation** (`visualize_equal_race.py`)  
-   - Race dynamics with overtakes, DNFs  
+## References
+- **Data**: FastF1  
+- **Models**: scikit-learn, statsmodels  
+- **Simulation**: logistic overtaking, Monte Carlo outcomes  
