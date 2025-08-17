@@ -7,6 +7,27 @@ season:
   year: 2025
   include_sprint: true   # controls which weekends to enumerate; we still load Q+R
 
+# ===== Weather (merge + simple temperature effect) =====
+weather:
+  use: true
+  merge_tolerance_seconds: 120   # nearest-time join tolerance
+  fields: ["ambient_temp_c", "track_temp_c"]  # what we guarantee to populate (NaN allowed)
+  temp_multiplier:               # temperature → tyre degradation scaling (small, bounded)
+    enable: true
+    base_c: 35           # reference track temperature (°C)
+    k_per_15c: 0.08      # +8% deg for each +15°C above base
+
+# ===== Viz (overlays) =====
+viz:
+  show_weather_overlay: true
+
+# ===== Season Monte Carlo =====
+season_simulation:
+  runs: 5000
+  include_sprint_points: false
+  fastest_lap_bonus: true
+  random_seed: 42
+
 # === Race model (choose: "ols_team", "ridge_team", "corrections_team") ===
 race_model: "ols_team"
 regularization_alpha: 1.0        # used only if race_model == "ridge_team"
