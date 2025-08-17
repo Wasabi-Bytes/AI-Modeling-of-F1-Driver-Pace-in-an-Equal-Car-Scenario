@@ -208,10 +208,10 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     d = d.copy()
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    # Build formula with optional interaction
-    base = "lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df=@df_age) + bs(lap_number, df=@df_lap)"
+    # Build formula with optional interaction (inject df via f-strings)
+    base = f"lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
     if use_age_interact:
-        base += " + C(compound):bs(lap_on_tyre, df=@df_age_int)"
+        base += f" + C(compound):bs(lap_on_tyre, df={df_age_int})"
 
     m = smf.ols(base, data=d).fit(cov_type="HC3")  # heteroskedasticity-robust
 
@@ -265,8 +265,8 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 
     # Fit with event FE, team FE, driver@team FE, plus non-linear controls
     formula = (
-        "lap_time_s ~ C(event) + C(team) + C(driver_team)"
-        + " + bs(lap_on_tyre, df=@df_age) + bs(lap_number, df=@df_lap)"
+        f"lap_time_s ~ C(event) + C(team) + C(driver_team)"
+        + f" + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
         + " + C(compound)"
     )
 
@@ -428,34 +428,70 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
 def combine_event_metrics(
     race_df: pd.DataFrame,
     quali_df: Optional[pd.DataFrame],
-    wR: float = 0.6,
-    wQ: float = 0.4,
+    wR: float = 0.6,   # kept for backward compatibility; ignored by precision-weighting
+    wQ: float = 0.4,   # kept for backward compatibility; ignored by precision-weighting
     apply_bayes_shrinkage: bool = True
 ) -> pd.DataFrame:
+    """
+    Precision-weighted event combination:
+      delta_event = (delta_R / sigma_R^2 + delta_Q / sigma_Q^2) / (1/sigma_R^2 + 1/sigma_Q^2)
+      se_event     = sqrt( 1 / (1/sigma_R^2 + 1/sigma_Q^2) )
+    Falls back to whichever side is present. Also emits QA columns:
+      - event_wR_eff, event_wQ_eff (effective weights that sum to 1 when both present)
+    """
     if quali_df is None:
         quali_df = pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
 
     m = pd.merge(race_df, quali_df, on=["driver", "team"], how="outer")
 
-    # If one side missing, use the other and its SE
+    # Normalize numeric types
     for col in ["race_delta_s", "quali_delta_s", "race_se_s", "quali_se_s"]:
         if col in m.columns:
             m[col] = pd.to_numeric(m[col], errors="coerce")
 
-    # Handle missing deltas: renormalize weights per row
     def _combine_row(r):
-        hasR = pd.notna(r.get("race_delta_s"))
-        hasQ = pd.notna(r.get("quali_delta_s"))
-        if hasR and hasQ:
-            delta = wR * r["race_delta_s"] + wQ * r["quali_delta_s"]
-            se = math.sqrt((wR * (r["race_se_s"] or 0.0)) ** 2 + (wQ * (r["quali_se_s"] or 0.0)) ** 2)
-        elif hasR:
-            delta, se = float(r["race_delta_s"]), float(r["race_se_s"] or np.nan)
-        elif hasQ:
-            delta, se = float(r["quali_delta_s"]), float(r["quali_se_s"] or np.nan)
+        dR, sR = r.get("race_delta_s"), r.get("race_se_s")
+        dQ, sQ = r.get("quali_delta_s"), r.get("quali_se_s")
+
+        # Handle missing/invalid SEs by treating that side as missing
+        validR = (pd.notna(dR) and pd.notna(sR) and float(sR) > 0.0)
+        validQ = (pd.notna(dQ) and pd.notna(sQ) and float(sQ) > 0.0)
+
+        if validR and validQ:
+            wR_eff = 1.0 / (float(sR) ** 2)
+            wQ_eff = 1.0 / (float(sQ) ** 2)
+            denom = wR_eff + wQ_eff
+            if denom <= 0 or not np.isfinite(denom):
+                return pd.Series({"event_delta_s": np.nan, "event_se_s": np.nan, "event_wR_eff": np.nan, "event_wQ_eff": np.nan})
+            delta = (float(dR) * wR_eff + float(dQ) * wQ_eff) / denom
+            se = math.sqrt(1.0 / denom)
+            return pd.Series({
+                "event_delta_s": float(delta),
+                "event_se_s": float(se),
+                "event_wR_eff": float(wR_eff / denom),
+                "event_wQ_eff": float(wQ_eff / denom),
+            })
+        elif validR:
+            return pd.Series({
+                "event_delta_s": float(dR),
+                "event_se_s": float(sR),
+                "event_wR_eff": 1.0,
+                "event_wQ_eff": 0.0,
+            })
+        elif validQ:
+            return pd.Series({
+                "event_delta_s": float(dQ),
+                "event_se_s": float(sQ),
+                "event_wR_eff": 0.0,
+                "event_wQ_eff": 1.0,
+            })
         else:
-            delta, se = float("nan"), float("nan")
-        return pd.Series({"event_delta_s": delta, "event_se_s": se})
+            return pd.Series({
+                "event_delta_s": np.nan,
+                "event_se_s": np.nan,
+                "event_wR_eff": np.nan,
+                "event_wQ_eff": np.nan,
+            })
 
     comb = m.apply(_combine_row, axis=1)
     m = pd.concat([m, comb], axis=1)
@@ -554,8 +590,9 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
         columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
     )
 
-    wR = float(cfg.get("wR", 0.6))
-    wQ = float(cfg.get("wQ", 0.4))
+    # Precision-weighted combination now happens inside combine_event_metrics
+    wR = float(cfg.get("wR", 0.6))  # ignored by precision weighting but kept for backward compatibility
+    wQ = float(cfg.get("wQ", 0.4))  # ignored by precision weighting but kept for backward compatibility
     apply_bayes = bool(cfg.get("apply_bayes_shrinkage", True))
     merged = combine_event_metrics(race_out, quali_out, wR=wR, wQ=wQ, apply_bayes_shrinkage=apply_bayes)
 
@@ -603,6 +640,16 @@ def main():
         df.insert(0, "year", meta["year"])
         df.insert(1, "gp", meta["gp"])
         all_rows.append(df)
+
+        # Lightweight QA: average effective weights for this event (rows with both sides present)
+        try:
+            both_mask = df["event_wR_eff"].notna() & df["event_wQ_eff"].notna()
+            if both_mask.any():
+                wR_mean = float(df.loc[both_mask, "event_wR_eff"].mean())
+                wQ_mean = float(df.loc[both_mask, "event_wQ_eff"].mean())
+                print(f"[INFO] {meta['year']} {meta['gp']}: avg effective weights -> race={wR_mean:.2f}, quali={wQ_mean:.2f}")
+        except Exception:
+            pass
 
         nR = int(res["race_only"].get("race_n", pd.Series(dtype=int)).sum()) if not res["race_only"].empty else 0
         nQ = int(res["quali_only"].get("quali_k", pd.Series(dtype=int)).sum()) if not res["quali_only"].empty else 0
