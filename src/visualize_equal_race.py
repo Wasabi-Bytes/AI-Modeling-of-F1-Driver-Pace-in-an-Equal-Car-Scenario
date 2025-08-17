@@ -607,19 +607,18 @@ def _spawn_rng_streams(cfg: dict, global_seed: int, run_idx: int = 0):
 
 def _finish_order_entropy(start_order: List[int], finish_order: List[int]) -> float:
     """
-    Entropy over absolute position-change magnitudes.
-    Gives 0 when nobody moves; larger when moves are varied.
+    Normalized inversion ratio (0=no changes, 1=complete reversal).
     """
     pos0 = {d: i for i, d in enumerate(start_order)}
-    pos1 = {d: i for i, d in enumerate(finish_order)}
-    deltas = [abs(pos0[d] - pos1[d]) for d in pos0]
-    if not deltas:
-        return 0.0
-    m = max(deltas)
-    counts = np.bincount(deltas, minlength=m+1).astype(float)
-    p = counts / counts.sum()
-    p = p[p > 0]
-    return float(-(p * np.log2(p)).sum())
+    seq = [pos0[d] for d in finish_order if d in pos0]
+    inv = 0
+    n = len(seq)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if seq[i] > seq[j]:
+                inv += 1
+    max_inv = n * (n - 1) // 2
+    return (inv / max_inv) if max_inv > 0 else 0.0
 
 # ------------------- Simulation -------------------
 def simulate_progress(
@@ -737,7 +736,7 @@ def simulate_progress(
         "start_gains_sec": None,       # filled after starts
         "grid_order": None,            # indices 0..D-1
         "finish_order": None,          # indices 0..D-1
-        "finish_entropy": None,
+        "finish_entropy": None,        # normalized inversion ratio
         "seed_meta": seed_meta,
         "timestamp": int(time.time()),
     }
@@ -847,7 +846,6 @@ def simulate_progress(
             for di in indices:
                 if r_dnf.random() < float(p_dnf_per_lap_vec[di]):
                     curr_lap[di] = n_laps
-                    speeds[di] = 0.0
                     _log(f"DNF: {drivers[di]}", sim_time)
                     stats["dnfs"].append(drivers[di])
 
@@ -1098,7 +1096,7 @@ def build_animation(
                     args=[None, {"fromcurrent": True,
                                  "frame": {"duration": frame_ms, "redraw": True},
                                  "transition": {"duration": 0}}])
-    buttons = [_btn(s, f"Play {int(s)}×") for s in [5.0,10.0,20.0,100.0]]
+    buttons = [_btn(s, f"Play {int(s)}×") for s in PLAYBACK_CHOICES]
     buttons.append(dict(label="Pause", method="animate",
                         args=[[None], {"mode": "immediate",
                                        "frame": {"duration": 0, "redraw": False},
