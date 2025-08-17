@@ -192,7 +192,7 @@ All tests currently **pass** on recent weekend data + synthetic fixtures.
 
 ## Limitations & Extensions
 
-**Simplifications (still present)**
+**Simplifications**
 
 * No explicit pit-strategy optimization
 * Weather not modeled; race evolution (beyond SC/VSC) simplified
@@ -200,9 +200,6 @@ All tests currently **pass** on recent weekend data + synthetic fixtures.
 
 **Planned / Ongoing**
 
-* Richer strategy & SC modeling (pit windows, tyre choices)
-* Expanded HB shrinkage & caching for fast re-runs
-* More granular track-aero interactions and DRS detection tuning
 * Additional diagnostics dashboards
 
 ---
