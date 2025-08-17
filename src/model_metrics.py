@@ -219,7 +219,6 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     d["pred"] = m.predict(d)
 
     # Normalize: remove predicted controls but keep intercept-like baseline
-    # (equivalent to using residuals + intercept)
     intercept = float(m.params.get("Intercept", 0.0))
     d["norm_time"] = d["lap_time_s"] - (d["pred"] - intercept)
 
@@ -307,28 +306,38 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 
 
 # ============================================================
-# ================= QUALIFYING (CURRENT LOGIC) ===============
+# ================= QUALIFYING (EVOLUTION-AWARE) =============
 # ============================================================
 
-def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
-    if "session" in d.columns:
-        d["session"] = d["session"].astype(str)
-        return d
-    for c in _SESSION_COL_CANDIDATES:
-        if c in d.columns:
-            d["session"] = d[c].astype(str)
-            return d
-    d["session"] = "Q"
-    return d
+def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series:
+    """Winsorize a series to [q_lower, q_upper]."""
+    s = s.astype(float)
+    lo = s.quantile(lower_q) if 0.0 < lower_q < 0.5 else None
+    hi = s.quantile(upper_q) if 0.5 < upper_q < 1.0 else None
+    if lo is not None:
+        s = s.clip(lower=lo)
+    if hi is not None:
+        s = s.clip(upper=hi)
+    return s
 
 
 def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Existing quali method (top-k per sub-session, within-team gap).
-    We'll modernize this in the next step when we tackle evolution-aware quali.
+    Evolution-aware quali metric.
+    Steps per event:
+      1) Keep only pace laps (lap_ok) and finite LapTimeSeconds.
+      2) Normalize each lap by its segment median (Q1/Q2/Q3).
+      3) Winsorize normalized laps (optional; default upper-tail only).
+      4) For each driver×segment, take the best normalized lap.
+      5) Compute teammate gap per segment vs team-best normalized lap.
+      6) Combine segments using inverse-variance weights where each driver×segment variance
+         is the variance of that driver's normalized laps in the segment (post-winsor), divided by n_laps.
+      7) Return per-driver (driver, team, quali_delta_s, quali_se_s, quali_k).
     """
+    out_cols = ["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
+
     if quali_df is None or len(quali_df) == 0:
-        return pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
+        return pd.DataFrame(columns=out_cols)
 
     d = quali_df.copy()
     d = _ensure_driver_column(d)
@@ -343,34 +352,73 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
         d = d[d["is_valid"].astype(bool)]
     d = d[np.isfinite(d["LapTimeSeconds"])]
     if d.empty:
-        return pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
+        return pd.DataFrame(columns=out_cols)
 
-    # Top-k within each driver/session
+    # 1) Segment (Q1/Q2/Q3) normalization by robust center (median)
+    seg_med = d.groupby("session")["LapTimeSeconds"].transform("median")
+    d["norm_lt"] = d["LapTimeSeconds"] - seg_med
+
+    # 2) Winsorization config (post-normalization)
+    use_winsor = bool(cfg.get("quali_winsorize", True))
+    q_low = float(cfg.get("quali_winsor_lower_q", 0.00))   # keep default no lower trim
+    q_high = float(cfg.get("quali_winsor_upper_q", 0.05))  # light upper-tail trim
+    if use_winsor:
+        d["norm_lt"] = (
+            d.groupby("session", group_keys=False)["norm_lt"]
+             .apply(lambda s: _winsorize_series(s, q_low, q_high))
+        )
+
+    # 3) Optional top-k AFTER normalization (defaults to using all laps)
+    use_topk = bool(cfg.get("quali_use_topk_after_norm", False))
     k = int(cfg.get("quali_top_k", 3))
-    best_per_session = (
-        d.sort_values("LapTimeSeconds")
-         .groupby(["driver", "team", "session"], as_index=False)
-         .head(k)
+    if use_topk:
+        d = (d.sort_values("norm_lt")
+               .groupby(["driver", "team", "session"], as_index=False)
+               .head(k))
+
+    # 4) Driver-session best normalized lap
+    drv_sess = (
+        d.groupby(["driver", "team", "session"], as_index=False)
+         .agg(
+             best_norm_lt=("norm_lt", "min"),
+             laps_n=("norm_lt", "size"),
+             laps_sd=("norm_lt", "std")
+         )
     )
+    # Variance proxy per driver-session: sd^2 / laps_n (guard against zeros)
+    drv_sess["var_ds"] = (drv_sess["laps_sd"].fillna(0.0) ** 2) / drv_sess["laps_n"].clip(lower=1)
 
-    # Take the best (min) per driver/session
-    best1 = best_per_session.groupby(["driver", "team", "session"], as_index=False)["LapTimeSeconds"].min()
-
-    # Within team per session: subtract team best
-    best1["team_best"] = best1.groupby(["team", "session"])["LapTimeSeconds"].transform("min")
-    best1["gap_s"] = best1["LapTimeSeconds"] - best1["team_best"]
-
-    # Aggregate over sessions per driver
-    agg = best1.groupby(["driver", "team"], dropna=False).agg(
-        quali_delta_s=("gap_s", "mean"),
-        quali_k=("session", "nunique"),
-        quali_sd=("gap_s", "std"),
-    ).reset_index()
-    agg["quali_se_s"] = agg.apply(
-        lambda r: (r["quali_sd"] / math.sqrt(max(int(r["quali_k"]), 1))) if pd.notna(r["quali_sd"]) else float("nan"),
-        axis=1,
+    # 5) Teammate best per segment (team reference in normalized space)
+    team_best = (
+        drv_sess.groupby(["team", "session"])["best_norm_lt"]
+                .min()
+                .rename("team_best_norm")
+                .reset_index()
     )
-    return agg[["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]].sort_values("quali_delta_s").reset_index(drop=True)
+    g = drv_sess.merge(team_best, on=["team", "session"], how="left")
+    g["gap_s"] = g["best_norm_lt"] - g["team_best_norm"]
+
+    # 6) Precision-weighted combine across segments per driver
+    # Weight w = 1 / var_ds (fallback for zero variance -> small epsilon)
+    eps = float(cfg.get("quali_var_epsilon", 1e-6))
+    g["w"] = 1.0 / (g["var_ds"].replace(0.0, eps))
+
+    def _combine_driver(df: pd.DataFrame) -> pd.Series:
+        W = df["w"].sum()
+        if W <= 0 or not np.isfinite(W):
+            return pd.Series({"quali_delta_s": np.nan, "quali_se_s": np.nan, "quali_k": 0})
+        delta = (df["gap_s"] * df["w"]).sum() / W
+        se = math.sqrt(1.0 / W)
+        k_sessions = int(df["session"].nunique())
+        return pd.Series({"quali_delta_s": float(delta), "quali_se_s": float(se), "quali_k": k_sessions})
+
+    # NOTE: keep compatibility with older pandas (no include_groups kw)
+    agg = g.groupby(["driver", "team"]).apply(_combine_driver).reset_index()
+
+    if agg.empty:
+        return pd.DataFrame(columns=out_cols)
+
+    return agg[out_cols].sort_values("quali_delta_s").reset_index(drop=True)
 
 
 # ============================================================
