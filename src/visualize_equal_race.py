@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 import json
+import hashlib
+import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
@@ -571,6 +573,54 @@ def get_overtake_params(cfg: dict, meta: Optional[dict] = None) -> Dict[str, flo
             base["dirty_air_penalty"] = float(np.clip(base["dirty_air_penalty"] * (0.9 + 0.3 * float(dfi)), 0.03, 0.60))
     return base
 
+# ------------------- RNG seeding helpers (NEW) -------------------
+def _seed_mix32(*parts) -> int:
+    """Stable 32-bit hash for seeding."""
+    h = hashlib.blake2b(digest_size=8)
+    for p in parts:
+        h.update(str(p).encode("utf-8"))
+        h.update(b"|")
+    return int.from_bytes(h.digest(), "little") & 0xFFFFFFFF
+
+def _event_key_for_seed(cfg: dict) -> str:
+    vt = _cfg_get(cfg, ["viz_track"], {}) or {}
+    return f"{vt.get('year','')}-{vt.get('grand_prix','')}".lower()
+
+def _spawn_rng_streams(cfg: dict, global_seed: int, run_idx: int = 0):
+    """
+    Deterministic streams per event/run using SeedSequence.
+    Returns dict of RNGs and a small metadata blob.
+    """
+    ek = _event_key_for_seed(cfg)
+    root = np.random.SeedSequence([int(global_seed), _seed_mix32(ek), int(run_idx)])
+    # Independent streams
+    names = ["start", "lap", "overtake", "dnf", "incident"]
+    children = root.spawn(len(names))
+    rngs = {nm: np.random.default_rng(ss) for nm, ss in zip(names, children)}
+    meta = {
+        "global_seed": int(global_seed),
+        "event_key": ek,
+        "run_idx": int(run_idx),
+        "spawn_keys": {nm: ss.spawn_key for nm, ss in zip(names, children)},
+    }
+    return rngs, meta
+
+def _finish_order_entropy(start_order: List[int], finish_order: List[int]) -> float:
+    """
+    Entropy over absolute position-change magnitudes.
+    Gives 0 when nobody moves; larger when moves are varied.
+    """
+    pos0 = {d: i for i, d in enumerate(start_order)}
+    pos1 = {d: i for i, d in enumerate(finish_order)}
+    deltas = [abs(pos0[d] - pos1[d]) for d in pos0]
+    if not deltas:
+        return 0.0
+    m = max(deltas)
+    counts = np.bincount(deltas, minlength=m+1).astype(float)
+    p = counts / counts.sum()
+    p = p[p > 0]
+    return float(-(p * np.log2(p)).sum())
+
 # ------------------- Simulation -------------------
 def simulate_progress(
     ranking: pd.DataFrame,
@@ -582,10 +632,18 @@ def simulate_progress(
     seed: int,
     cfg: Optional[dict] = None,
     meta: Optional[dict] = None,
+    run_idx: int = 0,
 ):
     if cfg is None:
         cfg = {}
-    rng = np.random.default_rng(seed)
+
+    # Deterministic, per-run RNG streams
+    rngs, seed_meta = _spawn_rng_streams(cfg, seed, run_idx)
+    r_start = rngs["start"]
+    r_lap = rngs["lap"]
+    r_pass = rngs["overtake"]
+    r_dnf = rngs["dnf"]
+    r_inc = rngs["incident"]
 
     # --- Meta pace bias (small) ---
     base_lap_eff = float(base_lap)
@@ -641,13 +699,13 @@ def simulate_progress(
     def_w  = float(_cfg_get(cfg, ["personality", "def_weight"], 1.0))
 
     # Base lap + driver deltas + jitter
-    base_driver = base_lap_eff + deltas + rng.normal(0.0, noise_sd, size=D)
+    base_driver = base_lap_eff + deltas + r_lap.normal(0.0, noise_sd, size=D)
 
     # Degradation matrix (compound & track-type aware; meta track_type preferred)
-    degrade = build_degradation_matrix(cfg, n_laps, drivers, rng, meta=meta)  # (L, D)
+    degrade = build_degradation_matrix(cfg, n_laps, drivers, r_lap, meta=meta)  # (L, D)
 
     # Random lap noise
-    eps_lap = rng.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
+    eps_lap = r_lap.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
 
     # Lap time cube
     lap_times = base_driver[None, :] + degrade + eps_lap
@@ -671,6 +729,22 @@ def simulate_progress(
     sc_laps_remaining = 0
     drs_disabled_until_lap = DRS_MIN_ENABLE_LAP
 
+    # ---- Run stats ----
+    stats = {
+        "attempts": 0,
+        "passes": 0,
+        "dnfs": [],
+        "start_gains_sec": None,       # filled after starts
+        "grid_order": None,            # indices 0..D-1
+        "finish_order": None,          # indices 0..D-1
+        "finish_entropy": None,
+        "seed_meta": seed_meta,
+        "timestamp": int(time.time()),
+    }
+    # base "grid" order from pace deltas (lower -> ahead)
+    grid_order = list(np.argsort(deltas))
+    stats["grid_order"] = grid_order
+
     # --- Grid & start model ---
     base_start_sd = float(_cfg_get(cfg, ["starts", "start_gain_sd"], START_GAIN_SD))
     rank_bias = float(_cfg_get(cfg, ["starts", "start_gain_rank_bias"], START_GAIN_RANK_BIAS))
@@ -684,7 +758,8 @@ def simulate_progress(
     else:
         scale_vec = np.ones(D, dtype=float)
 
-    start_gain_sec = rng.normal(0.0, base_start_sd, size=D) * scale_vec + bias
+    start_gain_sec = r_start.normal(0.0, base_start_sd, size=D) * scale_vec + bias
+    stats["start_gains_sec"] = {drivers[i]: float(start_gain_sec[i]) for i in range(D)}
     start_gain_pts = start_gain_sec * L0_speed
     curr_pts = np.maximum(0.0, curr_pts + np.clip(start_gain_pts, -P * 0.02, P * 0.02))
 
@@ -716,6 +791,7 @@ def simulate_progress(
         defended_this_lap[i_lead] = True
 
     def _attempt_pass(i_follow: int, i_lead: int, gap_at_det_s: float, tsec: float):
+        nonlocal stats
         L = min(curr_lap[i_follow], n_laps - 1)
         pace_lead = lap_times[L, i_lead]
         pace_foll = lap_times[L, i_follow]
@@ -730,11 +806,13 @@ def simulate_progress(
         dirty = float(otk["dirty_air_penalty"])
         logit = (alpha_eff * att_mult) * delta_norm + float(otk["beta_drs"]) * slip - (float(otk["gamma_defend"]) * def_mult) * defended - dirty
         p = 1.0 / (1.0 + math.exp(-logit))
-        if np.isfinite(p) and (rng.random() < p):
+        stats["attempts"] += 1
+        if np.isfinite(p) and (r_pass.random() < p):
             car_len = max(1, int(P * 0.0025))
             curr_pts[i_follow] = (curr_pts[i_lead] + car_len) % P
             curr_pts[i_lead] = (curr_pts[i_lead] - car_len) % P
             event_log.append((tsec, f"PASS: {drivers[i_follow]} → {drivers[i_lead]} (DRS)"))
+            stats["passes"] += 1
 
     def _log(msg: str, tsec: float):
         event_log.append((tsec, msg))
@@ -767,18 +845,19 @@ def simulate_progress(
                         z.pop(di, None)
             indices = np.where(crossed)[0]
             for di in indices:
-                if rng.random() < float(p_dnf_per_lap_vec[di]):
+                if r_dnf.random() < float(p_dnf_per_lap_vec[di]):
                     curr_lap[di] = n_laps
                     speeds[di] = 0.0
                     _log(f"DNF: {drivers[di]}", sim_time)
+                    stats["dnfs"].append(drivers[di])
 
         leader_completed = int(curr_lap.max() if curr_lap.size else 0)
 
         # Incidents -> SC/VSC
-        if phase == "GREEN" and leader_completed > 0 and rng.random() < P_INCIDENT_PER_LAP:
-            if rng.random() < SC_SHARE:
+        if phase == "GREEN" and leader_completed > 0 and r_inc.random() < P_INCIDENT_PER_LAP:
+            if r_inc.random() < SC_SHARE:
                 phase = "SC"
-                sc_laps_remaining = rng.integers(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
+                sc_laps_remaining = r_inc.integers(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
                 order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
                 lead = order[0]; base_pos = curr_pts[lead]
                 for rank, di in enumerate(order):
@@ -792,7 +871,7 @@ def simulate_progress(
                 _log("SAFETY CAR DEPLOYED (yellow)", sim_time)
             else:
                 phase = "VSC"
-                vsec = float(rng.uniform(VSC_DURATION_SEC_MINMAX[0], VSC_DURATION_SEC_MINMAX[1]))
+                vsec = float(r_inc.uniform(VSC_DURATION_SEC_MINMAX[0], VSC_DURATION_SEC_MINMAX[1]))
                 vsc_ticks_remaining = max(1, int(vsec / dt))
                 _log("VIRTUAL SAFETY CAR DEPLOYED", sim_time)
 
@@ -832,7 +911,7 @@ def simulate_progress(
                         P_DEFEND = float(np.clip(base_defend * (1.0 + 0.6 * def_w * (defence[i_lead] - 0.5)), 0.20, 0.95))
                     else:
                         P_DEFEND = 0.55
-                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (rng.random() < P_DEFEND):
+                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (r_pass.random() < P_DEFEND):
                         _apply_defense(i_lead)
                         _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+0.06s)", sim_time)
 
@@ -904,9 +983,15 @@ def simulate_progress(
     positions = np.stack(positions_list, axis=0)
     lap_key = np.stack(lapkey_list, axis=0)
     leader_lap = np.array(leaderlap_list, dtype=int)
+
+    # Finish stats
+    final_order = orders[-1] if orders else list(range(D))
+    stats["finish_order"] = final_order
+    stats["finish_entropy"] = _finish_order_entropy(stats["grid_order"], final_order)
+
     return (positions, lap_key, leader_lap, drivers,
             phase_flags, rc_texts, drs_on_flags, drs_banner,
-            orders, gaps_panel, zones, alpha_eff, det_eff)
+            orders, gaps_panel, zones, alpha_eff, det_eff, stats)
 
 # ------------------- Figure -------------------
 def _flag_style(phase: str) -> Tuple[str, str]:
@@ -1115,6 +1200,25 @@ def build_animation(
     fig.frames = frames
     return fig
 
+def _json_default(o):
+    """Make numpy/pandas types JSON-serializable."""
+    import numpy as _np
+    import pandas as _pd
+    if isinstance(o, (_np.integer,)):
+        return int(o)
+    if isinstance(o, (_np.floating,)):
+        return float(o)
+    if isinstance(o, (_np.bool_,)):
+        return bool(o)
+    if isinstance(o, (_np.ndarray,)):
+        return o.tolist()
+    if isinstance(o, (_pd.Timestamp, _np.datetime64)):
+        return str(o)
+    if isinstance(o, (set, tuple)):
+        return list(o)
+    # Fallback — last resort stringify
+    return str(o)
+
 # ------------------- Main -------------------
 def main():
     np.random.seed(RANDOM_SEED)
@@ -1131,6 +1235,10 @@ def main():
     n_laps = int(_cfg_get(vizsec, ["n_laps"], N_LAPS))
     dt = float(_cfg_get(vizsec, ["dt"], DT))
     noise_sd = float(_cfg_get(vizsec, ["lap_jitter_sd"], LAP_JITTER_SD))
+
+    # Seeds & run index for determinism/diversity
+    seed = int(_cfg_get(vizsec, ["seed"], RANDOM_SEED))
+    run_idx = int(_cfg_get(vizsec, ["run_idx"], 0))
 
     # Track metadata (optional)
     meta = _load_viz_track_meta(cfg)
@@ -1153,9 +1261,9 @@ def main():
 
     (positions, lap_key, leader_lap, drivers,
      phase_flags, rc_texts, drs_on, drs_banner,
-     orders, gaps_panel, zones, alpha_eff, det_eff) = simulate_progress(
+     orders, gaps_panel, zones, alpha_eff, det_eff, stats) = simulate_progress(
         ranking, xy, base_lap=base_lap, n_laps=n_laps, dt=dt,
-        noise_sd=noise_sd, seed=RANDOM_SEED, cfg=cfg, meta=meta
+        noise_sd=noise_sd, seed=seed, cfg=cfg, meta=meta, run_idx=run_idx
     )
 
     fig = build_animation(
@@ -1166,6 +1274,12 @@ def main():
     out_path = OUT_DIR / "simulation.html"
     fig.write_html(str(out_path), include_plotlyjs="cdn", auto_open=False)
     print(f"[INFO] Wrote visualization: {out_path}")
+
+    # Per-run log for reproducibility and MC stats
+    log_path = OUT_DIR / f"simulation_run_log_run{run_idx}.json"
+    with open(log_path, "w", encoding="utf-8") as fp:
+        json.dump(stats, fp, indent=2, default=_json_default)
+    print(f"[INFO] Wrote run log: {log_path}")
 
 if __name__ == "__main__":
     main()
