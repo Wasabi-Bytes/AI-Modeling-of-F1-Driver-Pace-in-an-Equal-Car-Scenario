@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 import warnings
 import math
 
 import numpy as np
 import pandas as pd
 
-from load_data import load_config, load_all_data  # for event ordering if needed
+from load_data import load_config
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
 
@@ -75,11 +75,9 @@ def _load_all_event_metrics(metrics_dir: Path) -> pd.DataFrame:
     return df
 
 
-# ---------- Aggregation ----------
+# ---------- Weight building pieces ----------
 def _choose_delta_and_se(df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
-    """
-    Prefer shrunk columns when available; fallback to raw event delta/SE.
-    """
+    """Prefer shrunk columns when available; fallback to raw event delta/SE."""
     if "event_delta_s_shrunk" in df.columns and df["event_delta_s_shrunk"].notna().any():
         delta = pd.to_numeric(df["event_delta_s_shrunk"], errors="coerce")
     else:
@@ -88,81 +86,137 @@ def _choose_delta_and_se(df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
     return delta, se
 
 
-def _inverse_variance_recency_weights(se: pd.Series, event_idx: pd.Series, max_idx: int, recency_decay: float) -> pd.Series:
-    """
-    Weight_i = (recency_decay ** events_ago) * (1 / se_i^2)
-    With guardrails for missing or zero SE.
-    """
-    eps = 1e-9
-    se2 = se**2
-    # If se is missing or 0, use a soft floor to avoid infinite weight
-    se2 = se2.where(se2 > 0, other=np.nan)
+def _invvar(se: pd.Series, eps: float = 1e-9) -> pd.Series:
+    """Inverse-variance with guards."""
+    se = pd.to_numeric(se, errors="coerce")
+    se2 = se ** 2
+    se2 = se2.where(se2 > 0, np.nan)
     base = 1.0 / se2
-    # If still all NaN, fall back to uniform base weights
     if base.notna().sum() == 0:
-        base = pd.Series(1.0, index=se.index)
-
-    # Recency: newer events get events_ago = 0, older larger number
-    events_ago = max_idx - event_idx.fillna(event_idx.max())
-    rec = (recency_decay ** events_ago).astype(float)
-    rec = rec.clip(lower=0.0, upper=1.0)
-
-    w = rec * base
-    # Normalize later per driver; return as-is now
-    return w
+        base = pd.Series(1.0, index=se.index)  # uniform fallback
+    return base
 
 
+def _recency_factor(
+    df: pd.DataFrame,
+    mode: str,
+    event_idx_col: str,
+    event_date_col: str,
+    event_decay: float,
+    half_life_days: float
+) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    """
+    Returns (recency_factor, events_ago, days_ago).
+    If dates are missing for half-life mode, falls back to event-index decay.
+    """
+    recency = pd.Series(1.0, index=df.index, dtype=float)
+    events_ago = pd.Series(np.nan, index=df.index, dtype=float)
+    days_ago = pd.Series(np.nan, index=df.index, dtype=float)
+
+    if mode == "date_half_life":
+        # Find a usable date column
+        cand_cols = [event_date_col, "event_date", "date", "session_date"]
+        date_col = next((c for c in cand_cols if c in df.columns), None)
+        if date_col is not None:
+            dates = pd.to_datetime(df[date_col], errors="coerce", utc=True)
+            if dates.notna().any():
+                max_date = dates.max()
+                days_ago = (max_date - dates).dt.total_seconds() / 86400.0
+                hl = max(float(half_life_days), 1.0)
+                recency = np.power(0.5, days_ago / hl)
+                # also compute events_ago for reference if present
+                if event_idx_col in df.columns:
+                    max_idx = int(pd.to_numeric(df[event_idx_col], errors="coerce").max())
+                    events_ago = max_idx - pd.to_numeric(df[event_idx_col], errors="coerce")
+                return recency.clip(0.0, 1.0), events_ago, days_ago
+
+    # Fallback or explicit event-index mode
+    if event_idx_col in df.columns:
+        idx = pd.to_numeric(df[event_idx_col], errors="coerce")
+        max_idx = int(idx.max())
+        events_ago = max_idx - idx
+        recency = np.power(float(event_decay), events_ago.clip(lower=0))
+    return recency.clip(0.0, 1.0), events_ago, days_ago
+
+
+def _sample_factor(df: pd.DataFrame, race_w: float, quali_w: float) -> pd.Series:
+    """
+    Effective sample size multiplier.
+    Use race laps (race_n) and a lightweight proxy for quali contribution (quali_k segments).
+    You can tune each via config weights.
+    """
+    race = pd.to_numeric(df.get("race_n"), errors="coerce").fillna(0.0).clip(lower=0.0)
+    quali = pd.to_numeric(df.get("quali_k"), errors="coerce").fillna(0.0).clip(lower=0.0)
+    eff = race_w * race + quali_w * quali
+    # Ensure at least 1.0 so events with zero counts but valid SE don't get nuked
+    return eff.replace(0.0, 1.0)
+
+
+# ---------- Aggregation ----------
 def aggregate_driver_metrics(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Input: per-lap/per-driver per-event metrics DataFrame from model_metrics.py output.
+    Input: per-driver per-event metrics DataFrame from model_metrics.py output.
     Output:
       - driver_ranking: aggregated equal-car delta per driver with SE and diagnostics
-      - event_breakdown: per-event effective weights used and chosen deltas
+      - event_breakdown: per-event effective weights and components
     """
-    # Columns sanity
     required = {"driver", "team", "year", "gp", "event_idx"}
     missing = required - set(events_df.columns)
     if missing:
         raise ValueError(f"Missing columns in input metrics: {missing}")
 
-    # Pick which deltas to aggregate
+    # Pick which deltas/SEs to aggregate
     delta, se = _choose_delta_and_se(events_df)
 
     df = events_df.copy()
     df["event_delta_pick"] = delta
     df["event_se_pick"] = se
 
-    # Weighting
-    recency_decay = float(cfg.get("recency_decay", 0.92))
-    max_idx = int(df["event_idx"].max())
-    df["w_base"] = _inverse_variance_recency_weights(df["event_se_pick"], df["event_idx"], max_idx, recency_decay)
+    # --- Config ---
+    wcfg = cfg.get("weighting", {}) if isinstance(cfg.get("weighting", {}), dict) else {}
+    recency_mode = str(wcfg.get("recency_mode", "event_index")).lower()  # "event_index" | "date_half_life"
+    event_decay = float(wcfg.get("event_recency_decay", 0.92))            # per-event index decay
+    half_life_days = float(wcfg.get("half_life_days", 120.0))            # date half-life
+    race_sample_w = float(wcfg.get("race_sample_weight", 1.0))
+    quali_sample_w = float(wcfg.get("quali_sample_weight", 1.0))
 
-    # Some diagnostics weights (optionally include sample counts)
-    # If race_n/quali_k exist, you can incorporate them multiplicatively:
-    if "race_n" in df.columns:
-        df["w_samples"] = df["race_n"].fillna(0).clip(lower=0)
-    else:
-        df["w_samples"] = 0.0
-    if "quali_k" in df.columns:
-        df["w_samples"] = df["w_samples"] + df["quali_k"].fillna(0).clip(lower=0)
+    # --- Weight components ---
+    invvar = _invvar(df["event_se_pick"])  # 1/SE^2
+    recency, events_ago, days_ago = _recency_factor(
+        df, recency_mode, "event_idx", "event_date", event_decay, half_life_days
+    )
+    sample = _sample_factor(df, race_sample_w, quali_sample_w)
 
-    # Final event weight: base weight (recency * inverse variance).
-    # You *may* add a small sample-based prior, but keep it simple for transparency.
-    df["event_weight"] = df["w_base"]
+    df["w_invvar"] = invvar
+    df["w_recency"] = recency
+    df["w_sample"] = sample
 
-    # Event-level breakdown for export
-    event_breakdown = df[[
+    # Final event weight = recency * invvar * sample
+    df["event_weight"] = df["w_recency"] * df["w_invvar"] * df["w_sample"]
+    df["events_ago"] = events_ago
+    df["days_ago"] = days_ago
+
+    # Event-level breakdown for export / inspection
+    keep_cols = [
         "year", "gp", "event_idx", "driver", "team",
-        "event_delta_pick", "event_se_pick", "event_weight",
-        "race_n", "quali_k",
-        "event_delta_s", "event_delta_s_shrunk", "event_se_s"
-    ]].copy().sort_values(["event_idx", "driver"], ignore_index=True)
+        "event_delta_pick", "event_se_pick",
+        "w_invvar", "w_recency", "w_sample", "event_weight",
+        "race_n", "quali_k", "events_ago", "days_ago",
+        # provenance / reference
+        "event_delta_s", "event_delta_s_shrunk", "event_se_s",
+        "event_wR_eff", "event_wQ_eff"
+    ]
+    present_cols = [c for c in keep_cols if c in df.columns]
+    event_breakdown = (
+        df[present_cols]
+        .copy()
+        .sort_values(["event_idx", "driver"], ignore_index=True)
+    )
 
     # Aggregate per driver
     def _agg_driver(sub: pd.DataFrame) -> pd.Series:
         d = pd.to_numeric(sub["event_delta_pick"], errors="coerce")
         w = pd.to_numeric(sub["event_weight"], errors="coerce")
-        se = pd.to_numeric(sub["event_se_pick"], errors="coerce")
 
         mask = d.notna() & w.notna() & (w > 0)
         if mask.sum() == 0:
@@ -175,15 +229,14 @@ def aggregate_driver_metrics(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tu
 
         d = d[mask]
         w = w[mask]
-        se = se[mask]
 
         # Weighted mean
         w_sum = float(w.sum())
         agg_delta = float((w * d).sum() / w_sum)
 
-        # SE of weighted mean: sqrt(1 / sum(w_invvar)), where w includes recency.
-        # Our w = recency / se^2  =>  sum_w = sum(recency / se^2)
-        # Approximate SE = sqrt(1 / sum_w)
+        # Approximate SE of weighted mean:
+        # Our event weights are w = recency * sample * (1/SE^2).
+        # The precision adds, so an optimistic but consistent SE is sqrt(1 / sum(w)).
         agg_se = math.sqrt(1.0 / w_sum) if w_sum > 0 else np.nan
 
         return pd.Series({
@@ -200,7 +253,7 @@ def aggregate_driver_metrics(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tu
           .sort_values("agg_delta_s", ignore_index=True)
     )
 
-    # Also keep team with the largest weight for label (purely cosmetic)
+    # Cosmetic label: team with the largest cumulative event_weight
     top_team = (
         df.groupby(["driver", "team"], dropna=False)["event_weight"]
           .sum()
@@ -225,7 +278,8 @@ def main():
     events_df = _load_all_event_metrics(metrics_dir)
 
     # Ensure numeric and sort by event order
-    events_df["event_idx"] = pd.to_numeric(events_df["event_idx"], errors="coerce").fillna(events_df["event_idx"].max()).astype(int)
+    events_df["event_idx"] = pd.to_numeric(events_df["event_idx"], errors="coerce") \
+        .fillna(events_df["event_idx"].max()).astype(int)
     events_df = events_df.sort_values(["event_idx", "driver"]).reset_index(drop=True)
 
     driver_ranking, event_breakdown = aggregate_driver_metrics(events_df, cfg)

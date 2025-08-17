@@ -32,6 +32,14 @@ wR: 0.6
 wQ: 0.4
 apply_bayes_shrinkage: true
 
+# === Weighting controls ===
+weighting:
+  recency_mode: "date_half_life"   # "date_half_life" or "event_index"
+  event_recency_decay: 0.92        # used if recency_mode == "event_index"
+  half_life_days: 120              # used if recency_mode == "date_half_life"
+  race_sample_weight: 1.0          # weight per race lap contributing (race_n)
+  quali_sample_weight: 1.0         # weight per quali segment contributing (quali_k)
+
 # === Visualization track (for outline helper) ===
 viz_track:
   year: 2025
