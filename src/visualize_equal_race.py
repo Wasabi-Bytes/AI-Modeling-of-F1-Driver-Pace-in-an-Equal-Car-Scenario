@@ -42,6 +42,33 @@ DRS_COOLDOWN_AFTER_SC_LAPS = 2
 DRS_MIN_ENABLE_LAP = 3
 DETECTION_OFFSET_FRACTION = 0.03
 
+# --- Calibrated degradation params loader & curve helper ---
+import json  # (ensure json is imported at top)
+
+def _load_degradation_params(cfg: dict) -> Optional[dict]:
+    path = _cfg_get(cfg, ["paths", "degradation_params"], None)
+    if not path:
+        return None
+    f = (PROJ / path).resolve()
+    if not f.exists():
+        return None
+    try:
+        with open(f, "r", encoding="utf-8") as fp:
+            return json.load(fp)
+    except Exception:
+        return None
+
+
+def _curve_from_params(n_laps: int, params_obj: dict) -> np.ndarray:
+    """Build cumulative degradation curve from {early_slope, late_slope, switch_lap}."""
+    e = float(params_obj.get("early_slope", 0.0))
+    l = float(params_obj.get("late_slope", 0.0))
+    sw = int(params_obj.get("switch_lap", 12))
+    t = np.arange(n_laps, dtype=float)  # 0..L-1; lap_on_tyre≈t
+    early = np.minimum(t, sw) * e
+    late = np.maximum(t - sw, 0.0) * l
+    return early + late
+
 # Safety Car / VSC (unchanged)
 P_INCIDENT_PER_LAP = 0.03
 SC_SHARE = 0.7
@@ -359,20 +386,67 @@ def _deg_params_for(compound: str, cfg: dict, track_type: str) -> Tuple[float, f
     return e, l, sw, track_mult
 
 def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np.random.Generator) -> np.ndarray:
-    """Return (n_laps, D) additive degradation in seconds, piecewise-linear; compound & track-type specific."""
-    D = len(drivers)
-    track_type = _track_type_from_cfg(cfg)
-    compounds = _compound_for_all(cfg, rng, D)
+    """
+    Return (n_laps, D) additive degradation in seconds per car.
 
-    lap_idx = np.arange(n_laps, dtype=float)[:, None]  # shape (L,1)
+    Modes:
+      - linear/config (default): use config.degradation.compounds + track_type_multipliers
+      - calibrated: read outputs/calibration/degradation_params.json and apply compound-specific curves
+                    (optionally per track_type). When 'calibrated' is used we *ignore*
+                    track_type_multipliers (to avoid double counting), but we still honor
+                    degradation.compound_scale if present.
+    """
+    D = len(drivers)
+    track_type = _track_type_from_cfg(cfg).lower()
+
+    # Choose compound per driver
+    compounds = _compound_for_all(cfg, rng, D)
+    source = str(_cfg_get(cfg, ["degradation", "source"], "linear")).lower()
+
+    # Optional overall multipliers per compound
+    scale_block = _cfg_get(cfg, ["degradation", "compound_scale"], {}) or {}
+    def _scale_for(c: str) -> float:
+        return float(scale_block.get(str(c).upper(), 1.0))
+
     out = np.zeros((n_laps, D), dtype=float)
+
+    if source == "calibrated":
+        params = _load_degradation_params(cfg)
+        if params:
+            by_tt = (params.get("by_track_type") or {})
+            global_p = (params.get("global") or {})
+
+            for j in range(D):
+                c = str(compounds[j]).upper()
+                # prefer per-track-type if available; else global
+                pobj = None
+                if track_type and track_type in by_tt:
+                    pobj = (by_tt.get(track_type) or {}).get(c)
+                if pobj is None:
+                    pobj = global_p.get(c)
+
+                if pobj is not None:
+                    curve = _curve_from_params(n_laps, pobj)
+                    out[:, j] = _scale_for(c) * curve
+                else:
+                    # fallback to config piecewise for this compound if missing
+                    e, l, sw, _ = _deg_params_for(c, cfg, track_type)
+                    t = np.arange(n_laps, dtype=float)
+                    out[:, j] = _scale_for(c) * (np.minimum(t, sw) * e + np.maximum(t - sw, 0.0) * l)
+            return out
+
+        # If params missing/unreadable, fall back to config behavior below.
+
+    # ----- Default/config behavior (linear/piecewise + track multipliers) -----
+    lap_idx = np.arange(n_laps, dtype=float)[:, None]  # (L,1)
     for j in range(D):
-        e, l, sw, mult = _deg_params_for(compounds[j], cfg, track_type)
-        # piecewise-linear cumulative degradation
+        c = str(compounds[j]).upper()
+        e, l, sw, mult = _deg_params_for(c, cfg, track_type)
         early = np.minimum(lap_idx, sw) * e
         late = np.maximum(lap_idx - sw, 0.0) * l
-        out[:, j] = mult * (early + late).ravel()
+        out[:, j] = _scale_for(c) * mult * (early + late).ravel()
     return out
+
 
 # ------------------- Overtaking params from config (+ track overrides) -------------------
 def get_overtake_params(cfg: dict) -> Dict[str, float]:
