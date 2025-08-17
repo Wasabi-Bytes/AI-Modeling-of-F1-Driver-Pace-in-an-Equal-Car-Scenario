@@ -63,7 +63,9 @@ def _se_from_residuals(resid: np.ndarray, n: int) -> float:
     return sd / math.sqrt(max(n, 1))
 
 
-# ---------- Smarter Empirical Bayes shrinker ----------
+# ============================================================
+# ========== Empirical Bayes shrinkage (smart target) ========
+# ============================================================
 def _read_shrinkage_cfg(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """Fetch shrinkage config with sensible defaults."""
     s = cfg.get("shrinkage", {}) or {}
@@ -100,30 +102,29 @@ def _team_level_shrink(
     then return the shrunk team mean for each row's team as the per-driver target.
     """
     if team is None or team.isna().all():
-        # No teams; fall back to field mean target
         mu_field = float(pd.to_numeric(delta, errors="coerce").mean())
         return pd.Series(mu_field, index=delta.index)
 
     d = pd.to_numeric(delta, errors="coerce")
     s2 = (pd.to_numeric(se, errors="coerce") ** 2).replace([np.inf, -np.inf], np.nan)
 
-    # Team raw means (ignore NaN deltas)
     by_team = pd.DataFrame({"delta": d, "se2": s2, "team": team}).dropna(subset=["delta"])
     if by_team.empty:
         mu_field = float(d.mean())
         return pd.Series(mu_field, index=delta.index)
 
     tm = by_team.groupby("team", dropna=False)["delta"].mean()
-    # Approximate sampling variance for team mean: mean(se^2)/n
     n_t = by_team.groupby("team", dropna=False)["delta"].size().astype(float)
     mean_se2_t = by_team.groupby("team", dropna=False)["se2"].mean().fillna(0.0)
     se2_team_mean = (mean_se2_t / n_t.clip(lower=1.0)).reindex(tm.index).fillna(0.0)
 
-    # Shrink team means toward field mean using EB at team level
     mu_field = float(tm.mean())
     resid_t = tm - mu_field
-    tau2_team = _moments_tau2(resid_t, se2_team_mean, cfg_sh["min_prior_var"]) \
-        if cfg_sh["prior_var_mode"] == "moments" else max(cfg_sh["prior_var_fixed"], cfg_sh["min_prior_var"])
+    tau2_team = (
+        _moments_tau2(resid_t, se2_team_mean, cfg_sh["min_prior_var"])
+        if cfg_sh["prior_var_mode"] == "moments"
+        else max(cfg_sh["prior_var_fixed"], cfg_sh["min_prior_var"])
+    )
     w_t = tau2_team / (tau2_team + se2_team_mean.replace(0.0, 1e-12))
     tm_shrunk = mu_field + w_t * (tm - mu_field)
 
@@ -152,22 +153,19 @@ def _empirical_bayes_shrinkage_smart(
     if target_mode == "zero":
         mu = pd.Series(0.0, index=d.index)
     elif target_mode == "team_mean":
-        # Plain team mean (exclude self would be too noisy; use all available)
         if team is None or team.isna().all():
             mu = pd.Series(float(d.mean()), index=d.index)
         else:
-            mu = pd.Series(index=d.index, dtype=float)
             tmp = pd.DataFrame({"team": team, "d": d})
-            team_mean = tmp.groupby("team", dropna=False)["d"].transform("mean")
-            mu = team_mean
-    else:  # "field_mean" (default)
+            mu = tmp.groupby("team", dropna=False)["d"].transform("mean")
+    else:  # "field_mean"
         mu = pd.Series(float(d.mean()), index=d.index)
 
     # Optional team random-effect: refine mu by shrinking team means toward field mean
     if cfg_sh["include_team_re"]:
         mu = _team_level_shrink(d, se, team, cfg_sh)
 
-    # Compute prior variance tau^2
+    # Prior variance tau^2
     if cfg_sh["prior_var_mode"] == "fixed":
         tau2 = max(cfg_sh["prior_var_fixed"], cfg_sh["min_prior_var"])
     else:
@@ -181,14 +179,26 @@ def _empirical_bayes_shrinkage_smart(
     return shrunk, w, float(tau2)
 
 
-# ---------- Column coalescers ----------
+def _empirical_bayes_shrinkage(delta: pd.Series, se: pd.Series):
+    """
+    Back-compat shim used by older call sites: delegate to the smart EB
+    with defaults (field mean target, no team RE).
+    """
+    shrunk, w, _ = _empirical_bayes_shrinkage_smart(delta, se, team=None, cfg={})
+    return shrunk, w
+
+
+# ============================================================
+# =================== Column coalescers ======================
+# ============================================================
 _TEAM_COL_CANDIDATES = [
     "team", "Team", "Constructor", "ConstructorName", "TeamName",
-    "Entrant", "Car", "CarName", "ConstructorTeam"
+    "Entrant", "Car", "CarName", "ConstructorTeam",
 ]
 _DRIVER_COL_CANDIDATES = ["driver", "Driver", "DriverNumber", "DriverId", "DriverRef"]
 _SESSION_COL_CANDIDATES = ["session", "Session", "phase", "Phase", "q_session"]
 _EVENT_COL_CANDIDATES = ["Event", "EventName", "GrandPrix", "GP", "gp"]
+
 
 def _ensure_driver_column(d: pd.DataFrame) -> pd.DataFrame:
     if "driver" in d.columns:
@@ -201,6 +211,7 @@ def _ensure_driver_column(d: pd.DataFrame) -> pd.DataFrame:
     d["driver"] = "UNK"
     return d
 
+
 def _ensure_team_column(d: pd.DataFrame) -> pd.DataFrame:
     if "team" in d.columns:
         d["team"] = d["team"].astype(str)
@@ -210,6 +221,7 @@ def _ensure_team_column(d: pd.DataFrame) -> pd.DataFrame:
             d["team"] = d[c].astype(str)
             return d
     raise ValueError("[race/quali] No team column found; please ensure a standard team field is present.")
+
 
 def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
     if "session" in d.columns:
@@ -222,6 +234,7 @@ def _ensure_session_column(d: pd.DataFrame) -> pd.DataFrame:
     d["session"] = "Q"
     return d
 
+
 def _ensure_event_column(d: pd.DataFrame) -> pd.DataFrame:
     if "event" in d.columns:
         d["event"] = d["event"].astype(str)
@@ -230,8 +243,7 @@ def _ensure_event_column(d: pd.DataFrame) -> pd.DataFrame:
         if c in d.columns:
             d["event"] = d[c].astype(str)
             return d
-    # Fallback to year+gp if present
-    if {"year","gp"}.issubset(d.columns):
+    if {"year", "gp"}.issubset(d.columns):
         d["event"] = (d["year"].astype(str) + " " + d["gp"].astype(str)).astype(str)
     else:
         d["event"] = "UNKNOWN_EVENT"
@@ -241,11 +253,8 @@ def _ensure_event_column(d: pd.DataFrame) -> pd.DataFrame:
 # ============================================================
 # =============== RACE METRICS (WITHIN TEAM) =================
 # ============================================================
-
 def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
-
-    # Only consume "pace" laps if lap_ok is available
     if "lap_ok" in d.columns:
         d = d[d["lap_ok"].astype(bool)].copy()
 
@@ -263,19 +272,21 @@ def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
     d["lap_number"] = pd.to_numeric(d["lap_number"], errors="coerce")
     d["LapTimeSeconds"] = pd.to_numeric(d["LapTimeSeconds"], errors="coerce")
 
-    # Trim obvious outliers (heavy tails) by stint: > Q3 + 3*IQR within driver×stint
+    # Trim obvious outliers by stint: > Q3 + 3*IQR within driver×stint (generous)
     if "stint_id" in d.columns:
         grp = d.groupby(["driver", "stint_id"])
     else:
-        grp = d.groupby(["driver"])  # fallback if stint missing
+        grp = d.groupby(["driver"])
     q1 = grp["LapTimeSeconds"].transform("quantile", 0.25)
     q3 = grp["LapTimeSeconds"].transform("quantile", 0.75)
     iqr = (q3 - q1).replace(0, np.nan)
-    keep = (d["LapTimeSeconds"] <= (q3 + 3 * iqr).fillna(q3 + 10.0))  # generous cap if IQR=0
+    keep = (d["LapTimeSeconds"] <= (q3 + 3 * iqr).fillna(q3 + 10.0))
     d = d.loc[keep].copy()
 
-    d = d.replace([np.inf, -np.inf], np.nan).dropna(subset=["LapTimeSeconds", "driver", "team", "compound", "lap_on_tyre", "lap_number", "event"])
-    # Normalized helper columns
+    d = d.replace([np.inf, -np.inf], np.nan).dropna(
+        subset=["LapTimeSeconds", "driver", "team", "compound", "lap_on_tyre", "lap_number", "event"]
+    )
+
     d["driver_team"] = d["driver"].astype(str) + "@" + d["team"].astype(str)
     d["driver_event"] = d["driver"].astype(str) + "-" + d["event"].astype(str)
     return d
@@ -284,51 +295,36 @@ def _prep_race_columns(d: pd.DataFrame) -> pd.DataFrame:
 def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
     Robust correction model with event fixed effects + spline controls.
-    Steps:
-      1) Fit: lap_time_s ~ C(event) + C(compound)
-               + bs(lap_on_tyre, df=DF_AGE) + bs(lap_number, df=DF_LAP)
-               + [optional: C(compound):bs(lap_on_tyre, df=DF_AGE_INT)]
-      2) Normalize laps: subtract predicted controls (keep intercept & event FE baseline)
-      3) Team-demean normalized times → driver deltas
-      4) SE per driver from residual spread (HC3 fit for robustness)
     """
     d = _prep_race_columns(race_df)
     if d.empty:
         return pd.DataFrame(columns=["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"])
 
-    # Configurable spline degrees (defaults are sensible)
     df_age = int(cfg.get("race_spline_df_tyre_age", 4))
     df_lap = int(cfg.get("race_spline_df_lap_num", 4))
-    df_age_int = int(cfg.get("race_spline_df_tyre_age_interact", 3))  # for compound × age interaction
+    df_age_int = int(cfg.get("race_spline_df_tyre_age_interact", 3))
     use_age_interact = bool(cfg.get("race_use_compound_age_interaction", True))
 
     d = d.copy()
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    # Build formula with optional interaction (inject df via f-strings)
     base = f"lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
     if use_age_interact:
         base += f" + C(compound):bs(lap_on_tyre, df={df_age_int})"
 
-    m = smf.ols(base, data=d).fit(cov_type="HC3")  # heteroskedasticity-robust
+    m = smf.ols(base, data=d).fit(cov_type="HC3")
 
-    # Predicted control component
     d["pred"] = m.predict(d)
-
-    # Normalize: remove predicted controls but keep intercept-like baseline
     intercept = float(m.params.get("Intercept", 0.0))
     d["norm_time"] = d["lap_time_s"] - (d["pred"] - intercept)
 
-    # Within-team demeaning
     d["team_mean"] = d.groupby("team", dropna=False)["norm_time"].transform("mean")
     d["demeaned"] = d["norm_time"] - d["team_mean"]
 
-    # Per-driver stats
     grp = d.groupby(["driver", "team"], dropna=False)
     mean_demeaned = grp["demeaned"].mean().rename("race_delta_s")
     n_by_driver = grp.size().rename("race_n")
 
-    # SE from per-driver residual spread
     res = d["demeaned"] - d.groupby(["driver", "team"], dropna=False)["demeaned"].transform("mean")
     se_by_driver = res.groupby([d["driver"], d["team"]]).std() / np.sqrt(
         res.groupby([d["driver"], d["team"]]).count().clip(lower=1)
@@ -344,11 +340,6 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
 def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
     Driver-within-team OLS with event FE + non-linear controls and cluster-robust SEs.
-    Model:
-      lap_time_s ~ C(event) + C(team) + C(driver_team)
-                   + bs(lap_on_tyre, df=DF_AGE) + bs(lap_number, df=DF_LAP) + C(compound)
-    Cluster-robust SEs (clusters = driver×event) help with stint autocorrelation.
-    Deltas are constructed from normalized laps (team-demeaned) rather than raw coefs.
     """
     d = _prep_race_columns(race_df)
     if d.empty:
@@ -360,28 +351,23 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     d = d.copy()
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    # Fit with event FE, team FE, driver@team FE, plus non-linear controls
     formula = (
         f"lap_time_s ~ C(event) + C(team) + C(driver_team)"
         + f" + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
         + " + C(compound)"
     )
 
-    # Cluster id = driver×event for robust SEs
     d["cluster_id"] = d["driver_event"].astype(str)
-
     m = smf.ols(formula, data=d).fit(
         cov_type="cluster",
         cov_kwds={"groups": d["cluster_id"]},
-        use_t=True
+        use_t=True,
     )
 
-    # Normalized laps using model prediction; keep intercept-like baseline
     intercept = float(m.params.get("Intercept", 0.0))
     d["pred"] = m.predict(d)
     d["norm_time"] = d["lap_time_s"] - (d["pred"] - intercept)
 
-    # Within-team means → deltas (lower = faster)
     d["team_mean"] = d.groupby("team", dropna=False)["norm_time"].transform("mean")
     d["demeaned"] = d["norm_time"] - d["team_mean"]
 
@@ -389,7 +375,6 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     mean_demeaned = grp["demeaned"].mean().rename("race_delta_s")
     n_by_driver = grp.size().rename("race_n")
 
-    # SE per driver from residual spread after normalization
     res = d["demeaned"] - d.groupby(["driver", "team"], dropna=False)["demeaned"].transform("mean")
     se_by_driver = res.groupby([d["driver"], d["team"]]).std() / np.sqrt(
         res.groupby([d["driver"], d["team"]]).count().clip(lower=1)
@@ -405,7 +390,6 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 # ============================================================
 # ================= QUALIFYING (EVOLUTION-AWARE) =============
 # ============================================================
-
 def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series:
     """Winsorize a series to [q_lower, q_upper]."""
     s = s.astype(float)
@@ -420,16 +404,7 @@ def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series
 
 def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Evolution-aware quali metric.
-    Steps per event:
-      1) Keep only pace laps (lap_ok) and finite LapTimeSeconds.
-      2) Normalize each lap by its segment median (Q1/Q2/Q3).
-      3) Winsorize normalized laps (optional; default upper-tail only).
-      4) For each driver×segment, take the best normalized lap.
-      5) Compute teammate gap per segment vs team-best normalized lap.
-      6) Combine segments using inverse-variance weights where each driver×segment variance
-         is the variance of that driver's normalized laps in the segment (post-winsor), divided by n_laps.
-      7) Return per-driver (driver, team, quali_delta_s, quali_se_s, quali_k).
+    Evolution-aware quali metric (normalize within Q1/Q2/Q3, precision-weight per segment).
     """
     out_cols = ["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
 
@@ -441,7 +416,6 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
     d = _ensure_team_column(d)
     d = _ensure_session_column(d)
 
-    # Lap time & validity
     d["LapTimeSeconds"] = pd.to_numeric(d.get("LapTimeSeconds", d.get("LapTime")), errors="coerce")
     if "lap_ok" in d.columns:
         d = d[d["lap_ok"].astype(bool)]
@@ -451,52 +425,44 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
     if d.empty:
         return pd.DataFrame(columns=out_cols)
 
-    # 1) Segment (Q1/Q2/Q3) normalization by robust center (median)
+    # 1) Segment medians & normalization
     seg_med = d.groupby("session")["LapTimeSeconds"].transform("median")
     d["norm_lt"] = d["LapTimeSeconds"] - seg_med
 
-    # 2) Winsorization config (post-normalization)
+    # 2) Winsorization
     use_winsor = bool(cfg.get("quali_winsorize", True))
-    q_low = float(cfg.get("quali_winsor_lower_q", 0.00))   # keep default no lower trim
-    q_high = float(cfg.get("quali_winsor_upper_q", 0.05))  # light upper-tail trim
+    q_low = float(cfg.get("quali_winsor_lower_q", 0.00))
+    q_high = float(cfg.get("quali_winsor_upper_q", 0.05))
     if use_winsor:
         d["norm_lt"] = (
             d.groupby("session", group_keys=False)["norm_lt"]
-             .apply(lambda s: _winsorize_series(s, q_low, q_high))
+            .apply(lambda s: _winsorize_series(s, q_low, q_high))
         )
 
-    # 3) Optional top-k AFTER normalization (defaults to using all laps)
+    # 3) Optional top-k after normalization
     use_topk = bool(cfg.get("quali_use_topk_after_norm", False))
     k = int(cfg.get("quali_top_k", 3))
     if use_topk:
-        d = (d.sort_values("norm_lt")
-               .groupby(["driver", "team", "session"], as_index=False)
-               .head(k))
+        d = d.sort_values("norm_lt").groupby(["driver", "team", "session"], as_index=False).head(k)
 
-    # 4) Driver-session best normalized lap
+    # 4) Driver-session best lap
     drv_sess = (
         d.groupby(["driver", "team", "session"], as_index=False)
-         .agg(
-             best_norm_lt=("norm_lt", "min"),
-             laps_n=("norm_lt", "size"),
-             laps_sd=("norm_lt", "std")
-         )
+        .agg(best_norm_lt=("norm_lt", "min"), laps_n=("norm_lt", "size"), laps_sd=("norm_lt", "std"))
     )
-    # Variance proxy per driver-session: sd^2 / laps_n (guard against zeros)
     drv_sess["var_ds"] = (drv_sess["laps_sd"].fillna(0.0) ** 2) / drv_sess["laps_n"].clip(lower=1)
 
-    # 5) Teammate best per segment (team reference in normalized space)
+    # 5) Team best per segment
     team_best = (
         drv_sess.groupby(["team", "session"])["best_norm_lt"]
-                .min()
-                .rename("team_best_norm")
-                .reset_index()
+        .min()
+        .rename("team_best_norm")
+        .reset_index()
     )
     g = drv_sess.merge(team_best, on=["team", "session"], how="left")
     g["gap_s"] = g["best_norm_lt"] - g["team_best_norm"]
 
-    # 6) Precision-weighted combine across segments per driver
-    # Weight w = 1 / var_ds (fallback for zero variance -> small epsilon)
+    # 6) Precision-weighted combine across segments
     eps = float(cfg.get("quali_var_epsilon", 1e-6))
     g["w"] = 1.0 / (g["var_ds"].replace(0.0, eps))
 
@@ -509,9 +475,7 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
         k_sessions = int(df["session"].nunique())
         return pd.Series({"quali_delta_s": float(delta), "quali_se_s": float(se), "quali_k": k_sessions})
 
-    # NOTE: keep compatibility with older pandas (no include_groups kw)
     agg = g.groupby(["driver", "team"]).apply(_combine_driver).reset_index()
-
     if agg.empty:
         return pd.DataFrame(columns=out_cols)
 
@@ -521,24 +485,30 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
 # ============================================================
 # ================== EVENT-LEVEL COMBINATION =================
 # ============================================================
-
 def combine_event_metrics(
-    race_df: pd.DataFrame,
+    race_df: Optional[pd.DataFrame],
     quali_df: Optional[pd.DataFrame],
     wR: float = 0.6,   # kept for backward compatibility; ignored by precision-weighting
     wQ: float = 0.4,   # kept for backward compatibility; ignored by precision-weighting
-    apply_bayes_shrinkage: bool = True
+    apply_bayes_shrinkage: bool = True,
 ) -> pd.DataFrame:
     """
     Precision-weighted event combination:
-      delta_event = (delta_R / sigma_R^2 + delta_Q / sigma_Q^2) / (1/sigma_R^2 + 1/sigma_Q^2)
-      se_event     = sqrt( 1 / (1/sigma_R^2 + 1/sigma_Q^2) )
-    Falls back to whichever side is present. Also emits QA columns:
-      - event_wR_eff, event_wQ_eff (effective weights that sum to 1 when both present)
+
+      delta_event = (dR/sR^2 + dQ/sQ^2) / (1/sR^2 + 1/sQ^2)
+      se_event    = sqrt( 1 / (1/sR^2 + 1/sQ^2) )
+
+    Robust to missing inputs:
+      - If quali is missing/empty -> event == race
+      - If race is missing/empty  -> event == quali
     """
-    if quali_df is None:
+    # Coalesce Nones/empties into typed empty frames with join keys
+    if race_df is None or len(race_df) == 0:
+        race_df = pd.DataFrame(columns=["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"])
+    if quali_df is None or len(quali_df) == 0:
         quali_df = pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
 
+    # Outer-merge on driver/team so we can fall back to whichever side exists
     m = pd.merge(race_df, quali_df, on=["driver", "team"], how="outer")
 
     # Normalize numeric types
@@ -546,11 +516,10 @@ def combine_event_metrics(
         if col in m.columns:
             m[col] = pd.to_numeric(m[col], errors="coerce")
 
-    def _combine_row(r):
+    def _combine_row(r: pd.Series) -> pd.Series:
         dR, sR = r.get("race_delta_s"), r.get("race_se_s")
         dQ, sQ = r.get("quali_delta_s"), r.get("quali_se_s")
 
-        # Handle missing/invalid SEs by treating that side as missing
         validR = (pd.notna(dR) and pd.notna(sR) and float(sR) > 0.0)
         validQ = (pd.notna(dQ) and pd.notna(sQ) and float(sQ) > 0.0)
 
@@ -559,57 +528,35 @@ def combine_event_metrics(
             wQ_eff = 1.0 / (float(sQ) ** 2)
             denom = wR_eff + wQ_eff
             if denom <= 0 or not np.isfinite(denom):
-                return pd.Series({"event_delta_s": np.nan, "event_se_s": np.nan, "event_wR_eff": np.nan, "event_wQ_eff": np.nan})
+                return pd.Series(
+                    {"event_delta_s": np.nan, "event_se_s": np.nan, "event_wR_eff": np.nan, "event_wQ_eff": np.nan}
+                )
             delta = (float(dR) * wR_eff + float(dQ) * wQ_eff) / denom
             se = math.sqrt(1.0 / denom)
-            return pd.Series({
-                "event_delta_s": float(delta),
-                "event_se_s": float(se),
-                "event_wR_eff": float(wR_eff / denom),
-                "event_wQ_eff": float(wQ_eff / denom),
-            })
+            return pd.Series(
+                {"event_delta_s": float(delta), "event_se_s": float(se), "event_wR_eff": float(wR_eff / denom), "event_wQ_eff": float(wQ_eff / denom)}
+            )
         elif validR:
-            return pd.Series({
-                "event_delta_s": float(dR),
-                "event_se_s": float(sR),
-                "event_wR_eff": 1.0,
-                "event_wQ_eff": 0.0,
-            })
+            return pd.Series({"event_delta_s": float(dR), "event_se_s": float(sR), "event_wR_eff": 1.0, "event_wQ_eff": 0.0})
         elif validQ:
-            return pd.Series({
-                "event_delta_s": float(dQ),
-                "event_se_s": float(sQ),
-                "event_wR_eff": 0.0,
-                "event_wQ_eff": 1.0,
-            })
+            return pd.Series({"event_delta_s": float(dQ), "event_se_s": float(sQ), "event_wR_eff": 0.0, "event_wQ_eff": 1.0})
         else:
-            return pd.Series({
-                "event_delta_s": np.nan,
-                "event_se_s": np.nan,
-                "event_wR_eff": np.nan,
-                "event_wQ_eff": np.nan,
-            })
+            return pd.Series({"event_delta_s": np.nan, "event_se_s": np.nan, "event_wR_eff": np.nan, "event_wQ_eff": np.nan})
 
     comb = m.apply(_combine_row, axis=1)
     m = pd.concat([m, comb], axis=1)
 
-    # Smarter Empirical-Bayes shrinkage (toward smart target, with optional team RE)
+    # Optional EB shrinkage on each layer (race/quali/event)
     if apply_bayes_shrinkage:
-        # We will shrink race, quali, and event deltas separately.
-        for (col_delta, col_se, out_col, w_col, tau_col) in [
-            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_tau2"),
-            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_tau2"),
-            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w", "event_tau2"),
+        for col_delta, col_se, out_col, w_col in [
+            ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w"),
+            ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w"),
+            ("event_delta_s", "event_se_s", "event_delta_s_shrunk", "event_shrink_w"),
         ]:
             if col_delta in m.columns and col_se in m.columns:
-                shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
-                    m[col_delta], m[col_se], m.get("team"), cfg={}
-                )
-                # Pass actual config from outer scope by closure? We'll set below in compute_event_metrics.
-                # In this function (standalone), fall back to defaults if cfg not injected.
+                shrunk, w = _empirical_bayes_shrinkage(m[col_delta], m[col_se])  # back-compat path
                 m[out_col] = shrunk
                 m[w_col] = w
-                m[tau_col] = float(tau2)
 
     return m
 
@@ -617,9 +564,8 @@ def combine_event_metrics(
 # ============================================================
 # ===================== ORCHESTRATOR =========================
 # ============================================================
-
 def _unpack_clean_payload(
-    result: Union[Tuple, Dict[str, Any]]
+    result: Union[Tuple, Dict, Any]
 ) -> Tuple[pd.DataFrame, Dict[str, Any], Optional[pd.DataFrame], Dict[str, Any]]:
     """
     Supports multiple return shapes from clean_event_payload:
@@ -648,14 +594,13 @@ def _unpack_clean_payload(
         if len(result) == 1:
             dR = result[0]
             return dR, {}, None, {}
-    # Fallback
     raise ValueError("clean_event_payload returned an unsupported structure")
 
 
 def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     For a single event: compute race (within-team), quali (within-team),
-    combine them into per-event deltas, and apply optional EB shrinkage.
+    combine them into per-event deltas, and apply optional EB shrinkage using cfg.
     """
     dR_clean, r_summary, dQ_clean, q_summary = _unpack_clean_payload(clean_event_payload(event, cfg))
 
@@ -678,29 +623,33 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
             .assign(
                 race_se_s=lambda x: x.apply(
                     lambda r: _se_from_residuals(
-                        d_tmp.loc[(d_tmp["driver"] == r["driver"]) & (d_tmp["team"] == r["team"]), "demeaned"].to_numpy()
+                        d_tmp.loc[
+                            (d_tmp["driver"] == r["driver"]) & (d_tmp["team"] == r["team"]),
+                            "demeaned",
+                        ].to_numpy()
                         - float(mean_.loc[(r["driver"], r["team"])]),
                         int(n_.loc[(r["driver"], r["team"])]),
                     ),
                     axis=1,
                 ),
                 race_n=lambda x: x.apply(lambda r: int(n_.loc[(r["driver"], r["team"])]), axis=1),
-                race_model="raw_team"
+                race_model="raw_team",
             )
         )[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]]
 
-    quali_out = quali_metrics_within_team(dQ_clean, cfg) if dQ_clean is not None else pd.DataFrame(
-        columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
+    quali_out = (
+        quali_metrics_within_team(dQ_clean, cfg)
+        if dQ_clean is not None
+        else pd.DataFrame(columns=["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"])
     )
 
-    # Precision-weighted combination to produce event-level delta/SE
-    wR = float(cfg.get("wR", 0.6))  # ignored by precision weighting but kept for backward compatibility
-    wQ = float(cfg.get("wQ", 0.4))  # ignored by precision weighting but kept for backward compatibility
-    apply_bayes = bool(cfg.get("apply_bayes_shrinkage", True))
+    # Precision-weighted combination (no shrinkage here; we’ll do it after with proper cfg)
+    wR = float(cfg.get("wR", 0.6))  # ignored by precision weighting; kept for back-compat signature
+    wQ = float(cfg.get("wQ", 0.4))
     merged = combine_event_metrics(race_out, quali_out, wR=wR, wQ=wQ, apply_bayes_shrinkage=False)
 
-    # Apply smarter EB shrinkage HERE (so we can pass cfg properly)
-    if apply_bayes:
+    # Apply smarter EB shrinkage HERE (so we can pass cfg properly, including team RE)
+    if bool(cfg.get("apply_bayes_shrinkage", True)):
         for (col_delta, col_se, out_col, w_col, tau_col) in [
             ("race_delta_s", "race_se_s", "race_delta_s_shrunk", "race_shrink_w", "race_tau2"),
             ("quali_delta_s", "quali_se_s", "quali_delta_s_shrunk", "quali_shrink_w", "quali_tau2"),
@@ -771,8 +720,10 @@ def main():
 
         nR = int(res["race_only"].get("race_n", pd.Series(dtype=int)).sum()) if not res["race_only"].empty else 0
         nQ = int(res["quali_only"].get("quali_k", pd.Series(dtype=int)).sum()) if not res["quali_only"].empty else 0
-        print(f"[INFO] {meta['year']} {meta['gp']}: metrics computed "
-              f"(drivers={df['driver'].nunique()}, race_n={nR}, quali_k={nQ})")
+        print(
+            f"[INFO] {meta['year']} {meta['gp']}: metrics computed "
+            f"(drivers={df['driver'].nunique()}, race_n={nR}, quali_k={nQ})"
+        )
 
     if all_rows:
         combined = pd.concat(all_rows, axis=0, ignore_index=True)
