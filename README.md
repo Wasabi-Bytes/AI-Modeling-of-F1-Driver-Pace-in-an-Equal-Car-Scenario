@@ -164,20 +164,6 @@ Normalized inversion ratio between grid and finish orders (0 = no changes, 1 = f
 
 ---
 
-## Quickstart
-
-1. Install deps (FastF1, pandas, numpy, statsmodels, plotly, etc.).
-2. Configure `config/config.yaml` (enable **weather** and **personality** as desired).
-3. Run the equal-car replay:
-
-   ```bash
-   python -m src.visualize_equal_race
-   # Output: outputs/viz/simulation.html
-   # Log   : outputs/viz/simulation_run_log_run0.json
-   ```
-
----
-
 ## Outputs
 
 * **Tables**:
