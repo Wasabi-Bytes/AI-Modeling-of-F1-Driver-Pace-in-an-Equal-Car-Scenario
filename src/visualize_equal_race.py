@@ -345,7 +345,40 @@ def _load_weights_from_config(cfg: dict) -> Tuple[float, float]:
     wQ = float(cfg.get("wQ", cfg.get("wq", 0.4)))
     return wR, wQ
 
-def load_driver_ranking_global() -> pd.DataFrame:
+def _normalize_delta_convention(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+    """
+    Ensure agg_delta_s means 'seconds ADDED (positive=slower)'.
+    Config knobs:
+      - metrics.delta_is_advantage: bool (True -> invert)
+      - metrics.delta_convention: 'loss_is_positive' | 'advantage_is_positive' | 'auto'
+    """
+    out = df.copy()
+    series = pd.to_numeric(out["agg_delta_s"], errors="coerce")
+    # explicit boolean wins
+    adv_flag = _cfg_get(cfg, ["metrics", "delta_is_advantage"], None)
+    if isinstance(adv_flag, bool):
+        if adv_flag:
+            out["agg_delta_s"] = -series
+        return out
+
+    conv = str(_cfg_get(cfg, ["metrics", "delta_convention"], "loss_is_positive") or "loss_is_positive").lower()
+    if conv in ("advantage_is_positive", "positive_is_faster", "faster_positive"):
+        out["agg_delta_s"] = -series
+        return out
+    if conv == "auto":
+        # Heuristic: if the distribution skews clearly positive and the max positive magnitude
+        # dominates the negative side, treat as 'advantage positive' and invert.
+        q10, q50, q90 = series.quantile([0.1, 0.5, 0.9])
+        max_pos = float(series.max()); min_neg = float(series.min())
+        if (q50 > 0) and (max_pos > abs(min_neg) * 1.1):
+            out["agg_delta_s"] = -series
+        return out
+    # default: already 'loss_is_positive'
+    return out
+
+def load_driver_ranking_global(cfg: Optional[dict] = None) -> pd.DataFrame:
+    if cfg is None:
+        cfg = {}
     path = PROJ / "outputs" / "aggregate" / "driver_ranking.csv"
     df = pd.read_csv(path)
     low = {c.lower(): c for c in df.columns}
@@ -359,7 +392,9 @@ def load_driver_ranking_global() -> pd.DataFrame:
     if se_col: out.rename(columns={se_col: "agg_se_s"}, inplace=True)
     else: out["agg_se_s"] = np.nan
     out["driver"] = out["driver"].astype(str)
-    out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce").fillna(out["agg_delta_s"].median())
+    out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
+    out = _normalize_delta_convention(out, cfg)
+    out["agg_delta_s"] = out["agg_delta_s"].fillna(out["agg_delta_s"].median())
     out["agg_se_s"] = pd.to_numeric(out["agg_se_s"], errors="coerce")
     return out
 
@@ -387,6 +422,7 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
         out.columns = ["driver", "agg_delta_s"]
         out["driver"] = out["driver"].astype(str)
         out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
+        out = _normalize_delta_convention(out, cfg)
         return out.dropna(subset=["agg_delta_s"])
 
     rcol = low.get("race_delta_s"); qcol = low.get("quali_delta_s")
@@ -397,7 +433,7 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     r = pd.to_numeric(df[rcol], errors="coerce")
     if qcol in df.columns:
         q = pd.to_numeric(df[qcol], errors="coerce")
-        df["__evt_delta__"] = (wR * r) + (wQ * q)   # FIXED: apply wR to race and wQ to quali
+        df["__evt_delta__"] = (wR * r) + (wQ * q)   # wR on race, wQ on quali
     else:
         df["__evt_delta__"] = (wR * r)
 
@@ -405,6 +441,7 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     out.columns = ["driver", "agg_delta_s"]
     out["driver"] = out["driver"].astype(str)
     out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
+    out = _normalize_delta_convention(out, cfg)
     return out.dropna(subset=["agg_delta_s"])
 
 def load_track_outline(cfg: dict) -> np.ndarray:
@@ -877,8 +914,8 @@ def simulate_progress(
         "timestamp": int(time.time()),
         "weather_summary": weather_summary or {},
     }
-    # base "grid" order from pace deltas (lower -> ahead)
-    grid_order = list(np.argsort(deltas))
+    # grid order: use actual baseline pace (lower -> ahead), not raw deltas
+    grid_order = list(np.argsort(base_driver))
     stats["grid_order"] = grid_order
 
     # NEW: place cars on a staggered grid using pace order
@@ -1166,6 +1203,7 @@ def _fmt_weather_overlay(ws: Optional[dict]) -> str:
 def build_animation(
     positions, lap_key, leader_lap, drivers, name_map, color_map, xy_path, n_laps,
     phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
+    dt: float,
     weather_summary: Optional[dict] = None,
 ) -> go.Figure:
     T, D, _ = positions.shape
@@ -1253,7 +1291,7 @@ def build_animation(
     fig.update_yaxes(showticklabels=False, row=2, col=2)
 
     def _btn(speed: float, label: str):
-        frame_ms = max(5, int(1000 * DT / speed))
+        frame_ms = max(5, int(1000 * dt / speed))  # use chosen dt, not global DT
         return dict(label=label, method="animate",
                     args=[None, {"fromcurrent": True,
                                  "frame": {"duration": frame_ms, "redraw": True},
@@ -1417,9 +1455,9 @@ def main():
         ranking = load_driver_ranking_event(cfg, gp_sub.lower())
         if ranking is None or ranking.empty:
             print("[WARN] Could not load per-event deltas; falling back to global aggregates.")
-            ranking = load_driver_ranking_global()
+            ranking = load_driver_ranking_global(cfg)
     else:
-        ranking = load_driver_ranking_global()
+        ranking = load_driver_ranking_global(cfg)
 
     xy = load_track_outline(cfg)
 
@@ -1438,6 +1476,7 @@ def main():
     fig = build_animation(
         positions, lap_key, leader_lap, drivers, name_map, color_map, xy, n_laps,
         phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
+        dt=dt,
         weather_summary=weather_summary
     )
 
