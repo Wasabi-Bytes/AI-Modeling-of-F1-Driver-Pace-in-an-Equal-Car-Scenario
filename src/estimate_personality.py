@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import warnings
 import numpy as np
 import pandas as pd
@@ -26,31 +26,15 @@ def _cfg_get(cfg: dict, path: list[str], default=None):
     return d
 
 
-def _to_num_arr(x) -> np.ndarray:
-    return np.asarray(pd.to_numeric(x, errors="coerce"))
+def _beta_post_mean(k: float, n: float, a: float = 1.0, b: float = 1.0) -> float:
+    return float((k + a) / (n + a + b)) if n >= 0 else np.nan
 
 
-def _beta_post_mean(k, n, a: float = 1.0, b: float = 1.0) -> np.ndarray:
-    """Vectorized posterior mean for Beta-Binomial with prior Beta(a,b)."""
-    k = _to_num_arr(k)
-    n = _to_num_arr(n)
-    denom = n + a + b
-    with np.errstate(invalid="ignore", divide="ignore"):
-        p = (k + a) / denom
-    # keep within [0,1]
-    return np.clip(p, 0.0, 1.0)
-
-
-def _beta_post_se(k, n, a: float = 1.0, b: float = 1.0) -> np.ndarray:
-    """Vectorized posterior SE ≈ sqrt( p(1-p)/(n+a+b+1) )."""
-    k = _to_num_arr(k)
-    n = _to_num_arr(n)
+def _beta_post_se(k: float, n: float, a: float = 1.0, b: float = 1.0) -> float:
     p = _beta_post_mean(k, n, a, b)
     tot = n + a + b
-    with np.errstate(invalid="ignore", divide="ignore"):
-        var = (p * (1.0 - p)) / (tot + 1.0)
-    var = np.where(np.isfinite(var), var, np.nan)
-    return np.sqrt(np.maximum(var, 0.0))
+    var = (p * (1 - p)) / (tot + 1)
+    return float(np.sqrt(max(var, 0.0)))
 
 
 def _minmax01(s: pd.Series) -> pd.Series:
@@ -74,6 +58,7 @@ def _ensure_series(df: pd.DataFrame, col: Optional[str], default_value=None, nam
         if name and s.name != name:
             s = s.rename(name)
         return s
+    # create a default-filled series
     return pd.Series([default_value] * len(df), index=df.index, name=(name or (col or "col")))
 
 
@@ -98,6 +83,7 @@ def _load_interactions_or_coarse(cfg: Dict[str, Any]) -> pd.DataFrame:
     csv_path = _find_interaction_csv()
     if csv_path is not None:
         df = pd.read_csv(csv_path)
+        # Normalize DRS column name to drs_available if we can
         low = {c.lower(): c for c in df.columns}
         for cand in ["drs_available", "drs_active", "drs", "isdrs"]:
             if cand in low and "drs_available" not in df.columns:
@@ -138,9 +124,11 @@ def _load_interactions_or_coarse(cfg: Dict[str, Any]) -> pd.DataFrame:
             "gp": ev.get("gp"),
         }).dropna(subset=["driver", "LapNumber"])
 
+        # compute pos_change per driver
         tmp2 = tmp2.sort_values(["driver", "LapNumber"]).copy()
         tmp2["pos_change"] = tmp2.groupby("driver")["Position"].diff().fillna(0.0)
 
+        # placeholders for interaction-only fields
         tmp2["drs_available"] = np.nan
         tmp2["gap_ahead_s"] = np.nan
         tmp2["gap_behind_s"] = np.nan
@@ -170,6 +158,7 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
     keep = [c for c in [driver_col, team_col, lap_col, pos_col, "pos_change", "drs_available", "gap_ahead_s", "gap_behind_s", "year", "gp"] if c in d.columns]
     d = d[keep].copy()
 
+    # rename to canonical
     ren = {}
     if driver_col in d.columns: ren[driver_col] = "driver"
     if team_col in d.columns: ren[team_col] = "team"
@@ -177,6 +166,7 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
     if pos_col in d.columns: ren[pos_col] = "Position"
     d = d.rename(columns=ren)
 
+    # Ensure essentials exist
     for req in ["driver", "LapNumber", "Position"]:
         if req not in d.columns:
             d[req] = np.nan
@@ -184,15 +174,23 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
     d["LapNumber"] = pd.to_numeric(d["LapNumber"], errors="coerce")
     d["Position"] = pd.to_numeric(d["Position"], errors="coerce")
 
+    # If pos_change missing, derive from Position per driver
     if "pos_change" not in d.columns:
         d = d.sort_values(["driver", "LapNumber"])
         d["pos_change"] = d.groupby("driver")["Position"].diff().fillna(0.0)
     d["pos_change"] = pd.to_numeric(d["pos_change"], errors="coerce").fillna(0.0)
 
+    # Harmonize DRS column name
+    if "drs_available" not in d.columns:
+        # try to find alternates
+        for alt in ["drs_active", "drs", "isdrs"]:
+            if alt in low:
+                d["drs_available"] = d[low[alt]]
+                break
     if "drs_available" in d.columns:
         d["drs_available"] = d["drs_available"].astype(bool)
 
-    # Opportunities & threats
+    # Define opportunities/threats
     drs_mask = (d["LapNumber"] >= 3)
     if "drs_available" in d.columns and d["drs_available"].notna().any():
         drs_mask = drs_mask & d["drs_available"]
@@ -220,7 +218,7 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
     n_defences = (n_threats - g["lost_pos"].sum()).clip(lower=0).rename("n_defences")
     exposure_laps = g.size().rename("exposure_laps")
 
-    # DNF proxy
+    # DNF proxy across events
     if {"year", "gp"}.issubset(d.columns):
         end = d.groupby(["year", "gp"])["LapNumber"].max().rename("Lmax_event")
         dl = d.join(end, on=["year", "gp"])
@@ -242,7 +240,6 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
     def_score = _minmax01(pd.Series(def_rate, index=n_threats.index))
     risk_score = _minmax01(pd.Series(risk_rate, index=events_seen.index))
 
-    # Vectorized posterior SEs
     agg_se = pd.Series(_beta_post_se(n_attacks, n_opps), index=n_opps.index, name="aggression_se")
     def_se = pd.Series(_beta_post_se(n_defences, n_threats), index=n_opps.index, name="defence_se")
     risk_se = pd.Series(_beta_post_se(dnf_events, events_seen), index=n_opps.index, name="risk_se")
@@ -263,6 +260,7 @@ def estimate_personality(cfg: Dict[str, Any]) -> pd.DataFrame:
         "exposure_laps": exposure_laps.reindex(n_opps.index).fillna(0).astype(int).values,
     })
 
+    # Fill any stragglers
     for col in ["aggression", "defence", "risk"]:
         out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.5)
     for col in ["aggression_se", "defence_se", "risk_se"]:

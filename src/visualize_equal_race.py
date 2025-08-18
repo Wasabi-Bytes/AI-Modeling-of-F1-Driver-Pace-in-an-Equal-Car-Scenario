@@ -6,7 +6,7 @@ import json
 import hashlib
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Callable
 
 import numpy as np
 import pandas as pd
@@ -419,6 +419,78 @@ def _apply_track_overrides(base: dict, cfg: dict) -> dict:
                 out[k] = v
     return out
 
+# ------------------- WEATHER: summary + temp multiplier -------------------
+def _extract_weather_summary_from_laps(laps: Optional[pd.DataFrame]) -> Optional[dict]:
+    if laps is None or len(laps) == 0:
+        return None
+    def med(colnames: List[str]):
+        for c in colnames:
+            if c in laps.columns:
+                v = pd.to_numeric(laps[c], errors="coerce")
+                if v.notna().any():
+                    return float(v.median())
+        return np.nan
+    return {
+        "median_track_temp_c": med(["track_temp_c", "TrackTemp", "TrackTempC"]),
+        "median_air_temp_c": med(["air_temp_c", "AirTemp", "AirTempC"]),
+        "median_wind_kph": med(["wind_speed_kph", "wind_kph", "WindSpeed", "WindKph"]),
+        "median_humidity_pct": med(["humidity_pct", "RelHumidity", "HumidityPct"]),
+    }
+
+def _load_weather_summary_for_viz(cfg: dict) -> Optional[dict]:
+    """Use the event's weather_summary medians if available; else compute medians from laps."""
+    vt = _cfg_get(cfg, ["viz_track"], {}) or {}
+    year, gp = vt.get("year"), vt.get("grand_prix")
+    try:
+        laps, meta = load_session(year, gp, "R")
+    except Exception:
+        laps, meta = None, None
+    # Prefer event weather_summary if present
+    ws = None
+    if isinstance(meta, dict):
+        ws = meta.get("weather_summary") or None
+    else:
+        # some integrations return an object with attribute
+        ws = getattr(meta, "weather_summary", None) if meta is not None else None
+    if ws and isinstance(ws, dict):
+        # Keep only expected keys (robustness)
+        out = {
+            "median_track_temp_c": float(pd.to_numeric(ws.get("median_track_temp_c"), errors="coerce")),
+            "median_air_temp_c": float(pd.to_numeric(ws.get("median_air_temp_c"), errors="coerce")) if "median_air_temp_c" in ws else np.nan,
+            "median_wind_kph": float(pd.to_numeric(ws.get("median_wind_kph"), errors="coerce")) if "median_wind_kph" in ws else np.nan,
+            "median_humidity_pct": float(pd.to_numeric(ws.get("median_humidity_pct"), errors="coerce")) if "median_humidity_pct" in ws else np.nan,
+        }
+        return out
+    # Fallback: compute from laps
+    return _extract_weather_summary_from_laps(laps)
+
+def _temp_multiplier_fn(cfg: dict, weather_summary: Optional[dict]) -> Callable[[str], float]:
+    """
+    Build a small multiplier function for tyre-degradation slopes based on track temp.
+    Multiplier ~= 1 + sens[compound] * k * (T - baseline), clipped to a small band.
+    """
+    # Defaults are intentionally small
+    te = _cfg_get(cfg, ["temp_effect"], {}) or {}
+    use = bool(te.get("use", True))
+    base_c = float(te.get("baseline_track_c", 30.0))
+    k = float(te.get("per_deg_pct", 0.004))  # +0.4% per °C
+    # per-compound sensitivity (Soft a bit more sensitive)
+    sens = te.get("compound_sensitivity", {"S": 1.15, "M": 1.00, "H": 0.85})
+    clip_lo = float(te.get("clip_low", -0.15))  # allow up to -15%
+    clip_hi = float(te.get("clip_high", 0.20))  # and +20%
+    T = None
+    if weather_summary and np.isfinite(pd.to_numeric(weather_summary.get("median_track_temp_c"), errors="coerce")):
+        T = float(pd.to_numeric(weather_summary.get("median_track_temp_c"), errors="coerce"))
+    if (not use) or (T is None):
+        return lambda _c: 1.0
+
+    dT = T - base_c
+    def f(compound: str) -> float:
+        s = float(sens.get(str(compound).upper(), 1.0))
+        mult = 1.0 + s * k * dT
+        return float(np.clip(mult, 1.0 + clip_lo, 1.0 + clip_hi))
+    return f
+
 # ------------------- Colors per driver -------------------
 def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[str, int]) -> Dict[str, str]:
     by_team: Dict[str, List[str]] = {}
@@ -491,7 +563,14 @@ def _deg_params_for(compound: str, cfg: dict, track_type: str) -> Tuple[float, f
     track_mult = float(mults.get(track_type, 1.0))
     return e, l, sw, track_mult
 
-def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np.random.Generator, meta: Optional[dict] = None) -> np.ndarray:
+def build_degradation_matrix(
+    cfg: dict,
+    n_laps: int,
+    drivers: List[str],
+    rng: np.random.Generator,
+    meta: Optional[dict] = None,
+    temp_mult_fn: Optional[Callable[[str], float]] = None,
+) -> np.ndarray:
     """
     Return (n_laps, D) additive degradation in seconds per car.
 
@@ -501,6 +580,7 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
                     (optionally per track_type). When 'calibrated' is used we *ignore*
                     track_type_multipliers (to avoid double counting), but we still honor
                     degradation.compound_scale if present.
+    Applies a small 'temp_mult_fn(compound)' if provided, to scale the slope/curve.
     """
     D = len(drivers)
     track_type = _track_type_from_cfg(cfg, meta=meta).lower()
@@ -511,6 +591,10 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
     scale_block = _cfg_get(cfg, ["degradation", "compound_scale"], {}) or {}
     def _scale_for(c: str) -> float:
         return float(scale_block.get(str(c).upper(), 1.0))
+
+    # identity multiplier if not provided
+    if temp_mult_fn is None:
+        temp_mult_fn = lambda _c: 1.0
 
     out = np.zeros((n_laps, D), dtype=float)
 
@@ -528,22 +612,24 @@ def build_degradation_matrix(cfg: dict, n_laps: int, drivers: List[str], rng: np
                 if pobj is None:
                     pobj = global_p.get(c)
 
+                tm = float(temp_mult_fn(c))
                 if pobj is not None:
                     curve = _curve_from_params(n_laps, pobj)
-                    out[:, j] = _scale_for(c) * curve
+                    out[:, j] = tm * _scale_for(c) * curve
                 else:
                     e, l, sw, _ = _deg_params_for(c, cfg, track_type)
                     t = np.arange(n_laps, dtype=float)
-                    out[:, j] = _scale_for(c) * (np.minimum(t, sw) * e + np.maximum(t - sw, 0.0) * l)
+                    out[:, j] = tm * _scale_for(c) * (np.minimum(t, sw) * e + np.maximum(t - sw, 0.0) * l)
             return out
 
     lap_idx = np.arange(n_laps, dtype=float)[:, None]  # (L,1)
     for j in range(D):
         c = str(compounds[j]).upper()
         e, l, sw, mult = _deg_params_for(c, cfg, track_type)
+        tm = float(temp_mult_fn(c))
         early = np.minimum(lap_idx, sw) * e
         late = np.maximum(lap_idx - sw, 0.0) * l
-        out[:, j] = _scale_for(c) * mult * (early + late).ravel()
+        out[:, j] = tm * _scale_for(c) * mult * (early + late).ravel()
     return out
 
 # ------------------- Overtaking params from config (+ track overrides & META) -------------------
@@ -631,6 +717,7 @@ def simulate_progress(
     seed: int,
     cfg: Optional[dict] = None,
     meta: Optional[dict] = None,
+    weather_summary: Optional[dict] = None,
     run_idx: int = 0,
 ):
     if cfg is None:
@@ -666,10 +753,19 @@ def simulate_progress(
 
     # Detect DRS zones from geometry, then optionally truncate to metadata count
     zones = _find_drs_zones(xy_path)
-    if meta and isinstance(meta.get("drs_zones", None), (int, np.integer)) and meta["drs_zones"] is not None:
-        K = int(max(0, meta["drs_zones"]))
-        if K >= 0:
-            zones = zones[:K]  # take longest K zones (0 -> none)
+
+    # Only truncate when K > 0; K==0 should mean "don't override"
+    if meta and isinstance(meta.get("drs_zones", None), (int, np.integer)):
+        K = int(meta["drs_zones"])
+        if K > 0:
+            zones = zones[:K]
+
+    # Fallback to a generic straight if detection/metadata yields none
+    if not zones:
+        zs = int(0.15 * P);
+        ze = int(0.35 * P);
+        zd = int(0.12 * P)
+        zones = [(zs, ze, zd)]
 
     det_eff = float(otk["drs_detect_thresh_s"])
 
@@ -701,7 +797,8 @@ def simulate_progress(
     base_driver = base_lap_eff + deltas + r_lap.normal(0.0, noise_sd, size=D)
 
     # Degradation matrix (compound & track-type aware; meta track_type preferred)
-    degrade = build_degradation_matrix(cfg, n_laps, drivers, r_lap, meta=meta)  # (L, D)
+    tmul_fn = _temp_multiplier_fn(cfg, weather_summary)
+    degrade = build_degradation_matrix(cfg, n_laps, drivers, r_lap, meta=meta, temp_mult_fn=tmul_fn)  # (L, D)
 
     # Random lap noise
     eps_lap = r_lap.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
@@ -739,10 +836,25 @@ def simulate_progress(
         "finish_entropy": None,        # normalized inversion ratio
         "seed_meta": seed_meta,
         "timestamp": int(time.time()),
+        "weather_summary": weather_summary or {},
     }
     # base "grid" order from pace deltas (lower -> ahead)
     grid_order = list(np.argsort(deltas))
     stats["grid_order"] = grid_order
+
+    # base "grid" order from pace deltas (lower -> ahead)
+    grid_order = list(np.argsort(deltas))
+    stats["grid_order"] = grid_order
+
+    # NEW: place cars on a staggered grid using pace order
+    GRID_GAP_SEC = float(_cfg_get(cfg, ["starts", "grid_gap_sec"], 0.16))  # ~0.16s between rows
+    leader_speed_pts_per_sec = float(speed_pts_per_sec[0, grid_order[0]])
+    gap_pts = max(1.0, GRID_GAP_SEC * leader_speed_pts_per_sec)
+
+    curr_pts[:] = 0.0
+    for rank, di in enumerate(grid_order):
+        # P1 near the line; each row ~GRID_GAP_SEC further back
+        curr_pts[di] = (P - rank * gap_pts) % P
 
     # --- Grid & start model ---
     base_start_sd = float(_cfg_get(cfg, ["starts", "start_gain_sd"], START_GAIN_SD))
@@ -1002,9 +1114,22 @@ def _track_color(phase: str) -> str:
     if phase == "VSC": return "rgba(255,165,0,0.45)"
     return "rgba(80,90,110,0.25)"
 
+def _fmt_weather_overlay(ws: Optional[dict]) -> str:
+    if not ws:
+        return "Weather: n/a"
+    ttrk = ws.get("median_track_temp_c")
+    tair = ws.get("median_air_temp_c")
+    wind = ws.get("median_wind_kph")
+    hum = ws.get("median_humidity_pct")
+    def _f(val, suf):
+        return f"{val:.0f}{suf}" if (val is not None and np.isfinite(val)) else "—"
+    return (f"Weather (median): Track {_f(ttrk,'°C')}  |  Air {_f(tair,'°C')}  |  "
+            f"Wind {_f(wind,' kph')}  |  Hum {_f(hum,' %')}")
+
 def build_animation(
     positions, lap_key, leader_lap, drivers, name_map, color_map, xy_path, n_laps,
-    phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff
+    phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
+    weather_summary: Optional[dict] = None,
 ) -> go.Figure:
     T, D, _ = positions.shape
     labels = [str(dr).upper()[:3] for dr in drivers]
@@ -1105,21 +1230,25 @@ def build_animation(
     banner_text, banner_bg = _flag_style(phase_flags[0] if len(phase_flags) else "GREEN")
     drs_tag = drs_banner[0] if len(drs_banner) else "DRS DISABLED"
     initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
+    wx_text = _fmt_weather_overlay(weather_summary)
 
     fig.update_layout(
         height=920,
-        margin=dict(l=16, r=16, t=140, b=20),
+        margin=dict(l=16, r=16, t=168, b=20),
         legend=dict(title="Drivers", x=0.01, y=0.98, bgcolor="rgba(255,255,255,0.6)"),
-        updatemenus=[dict(type="buttons", showactive=False, x=0.48, y=1.16, xanchor="center", buttons=buttons)],
+        updatemenus=[dict(type="buttons", showactive=False, x=0.48, y=1.20, xanchor="center", buttons=buttons)],
         title=f"Equal-Car Replay  •  DRSα={alpha_eff:.2f}  det≈{det_eff:.2f}s",
         annotations=[
-            dict(text=f"Lap {initial_lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
+            dict(text=f"Lap {initial_lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.21, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d")),
-            dict(text=banner_text, showarrow=False, x=0.50, y=1.17, xref="paper", yref="paper",
+            dict(text=banner_text, showarrow=False, x=0.50, y=1.21, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d"), bgcolor=banner_bg),
-            dict(text=drs_tag, showarrow=False, x=0.78, y=1.17, xref="paper", yref="paper",
+            dict(text=drs_tag, showarrow=False, x=0.78, y=1.21, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d"),
                  bgcolor="#e8f1ff" if ("ENABLED" in drs_tag) else "#ffd6d6"),
+            dict(text=wx_text, showarrow=False, x=0.01, y=1.12, xanchor="left", xref="paper", yref="paper",
+                 font=dict(size=13, color="#1f2d3d"),
+                 bgcolor="#eef6ff"),
         ],
         paper_bgcolor="#f2f6fb"
     )
@@ -1181,14 +1310,17 @@ def build_animation(
                 data=frame_data,
                 layout=go.Layout(
                     annotations=[
-                        dict(text=f"Lap {lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.17, xref="paper", yref="paper",
+                        dict(text=f"Lap {lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.21, xref="paper", yref="paper",
                              font=dict(size=14, color="#1f2d3d")),
-                        dict(text=banner_text, showarrow=False, x=0.50, y=1.17, xref="paper", yref="paper",
+                        dict(text=banner_text, showarrow=False, x=0.50, y=1.21, xref="paper", yref="paper",
                              font=dict(size=14, color="#1f2d3d"), bgcolor=banner_bg),
                         dict(text=("DRS ENABLED" if "ENABLED" in drs_banner[ti] else "DRS DISABLED"),
-                             showarrow=False, x=0.78, y=1.17, xref="paper", yref="paper",
+                             showarrow=False, x=0.78, y=1.21, xref="paper", yref="paper",
                              font=dict(size=14, color="#1f2d3d"),
                              bgcolor="#e8f1ff" if ("ENABLED" in drs_banner[ti]) else "#ffd6d6"),
+                        dict(text=_fmt_weather_overlay(weather_summary), showarrow=False,
+                             x=0.01, y=1.12, xanchor="left", xref="paper", yref="paper",
+                             font=dict(size=13, color="#1f2d3d"), bgcolor="#eef6ff"),
                     ]
                 ),
                 name=str(ti),
@@ -1240,6 +1372,8 @@ def main():
 
     # Track metadata (optional)
     meta = _load_viz_track_meta(cfg)
+    # Weather summary (preferred from event["weather_summary"]; fallback to laps medians)
+    weather_summary = _load_weather_summary_for_viz(cfg)
 
     # Deltas: event-specific or global
     if use_evt:
@@ -1261,12 +1395,13 @@ def main():
      phase_flags, rc_texts, drs_on, drs_banner,
      orders, gaps_panel, zones, alpha_eff, det_eff, stats) = simulate_progress(
         ranking, xy, base_lap=base_lap, n_laps=n_laps, dt=dt,
-        noise_sd=noise_sd, seed=seed, cfg=cfg, meta=meta, run_idx=run_idx
+        noise_sd=noise_sd, seed=seed, cfg=cfg, meta=meta, weather_summary=weather_summary, run_idx=run_idx
     )
 
     fig = build_animation(
         positions, lap_key, leader_lap, drivers, name_map, color_map, xy, n_laps,
-        phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff
+        phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
+        weather_summary=weather_summary
     )
 
     out_path = OUT_DIR / "simulation.html"

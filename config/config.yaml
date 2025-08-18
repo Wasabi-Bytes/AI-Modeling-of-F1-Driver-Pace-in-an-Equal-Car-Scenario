@@ -41,7 +41,6 @@ race_use_compound_age_interaction: true
 race_spline_df_track_temp: 3                   # NEW
 race_use_temp_compound_interaction: false      # NEW
 
-
 # Optional feature toggles for README "expose all knobs"
 race_use_event_fe: true          # include C(event) in race models
 race_se_type: "cluster"          # "cluster" (driver_event) or "HC3"
@@ -90,18 +89,19 @@ viz_track:
 
 # ===== Equal-car visualization (optional overrides) =====
 visualize_equal_race:
-  use_event_specific_deltas: true
+  use_event_specific_deltas: false   # CHANGED: sanity run uses global deltas
   target_gp_substr: "canadian"
   base_lap_sec: 90.0
   n_laps: 20
   dt: 0.5
   lap_jitter_sd: 0.12
   random_seed: 42
+  run_idx: 0
 
 # ===== Reliability model =====
 reliability:
   mode: "per_race"
-  per_race_dnf: 0.10
+  per_race_dnf: 0.00          # CHANGED: disable DNFs for sanity check
   typical_race_laps: 70
   # per_lap: 0.0015  # only if mode == "per_lap"
 
@@ -157,7 +157,7 @@ use_hierarchical_shrinkage: false
 
 # ===== Driver personality =====
 personality:
-  use: false
+  use: false              # keep disabled for sanity check
   agg_weight: 1.0
   def_weight: 1.0
   risk_weight: 1.0
@@ -178,7 +178,7 @@ aggregation:
 
 # ===== Event-delta usage =====
 event_deltas:
-  use_event_specific: false
+  use_event_specific: false   # FYI: the viz script ignores this; it uses visualize_equal_race.use_event_specific_deltas
 
 # ===== Reproducibility & diversity =====
 rng:
