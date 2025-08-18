@@ -528,6 +528,14 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
     base = f"lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
+    # Temperature spline (optional)
+    df_temp = int(cfg.get("race_spline_df_track_temp", 3))
+    use_temp_comp = bool(cfg.get("race_use_temp_compound_interaction", False))
+    if (df_temp > 0) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
+        base += f" + bs(track_temp_c_filled, df={df_temp})"
+        if use_temp_comp:
+            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp})"
+
     if use_age_interact:
         base += f" + C(compound):bs(lap_on_tyre, df={df_age_int})"
 
@@ -578,6 +586,14 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
         + f" + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
         + " + C(compound)"
     )
+
+    # Temperature spline (optional)
+    df_temp = int(cfg.get("race_spline_df_track_temp", 3))
+    use_temp_comp = bool(cfg.get("race_use_temp_compound_interaction", False))
+    if (df_temp > 0) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
+        base += f" + bs(track_temp_c_filled, df={df_temp})"
+        if use_temp_comp:
+            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp})"
 
     # Optional track controls
     formula = _append_track_controls_to_formula(base, d, cfg)
@@ -832,6 +848,28 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
 
     # Attach track tags (no-op if metadata missing)
     dR_clean = _attach_event_track_tags(dR_clean, event, cfg)
+    # --- Temperature covariate prep (fill NaNs with event median) ---
+    dR_clean = dR_clean.copy()
+    if "track_temp_c" not in dR_clean.columns:
+        dR_clean["track_temp_c"] = np.nan
+    dR_clean["track_temp_c_filled"] = pd.to_numeric(dR_clean["track_temp_c"], errors="coerce")
+
+    # Prefer event/race summaries; fall back to in-sample median
+    med_temp = np.nan
+    try:
+        med_temp = float(
+            pd.to_numeric((event.get("weather_summary") or {}).get("median_track_temp_c"), errors="coerce"))
+    except Exception:
+        pass
+    if not np.isfinite(med_temp):
+        try:
+            med_temp = float(pd.to_numeric((r_summary or {}).get("median_track_temp_c"), errors="coerce"))
+        except Exception:
+            pass
+    if not np.isfinite(med_temp):
+        med_temp = float(dR_clean["track_temp_c_filled"].median())
+
+    dR_clean["track_temp_c_filled"] = dR_clean["track_temp_c_filled"].fillna(med_temp)
     if dQ_clean is not None:
         dQ_clean = _attach_event_track_tags(dQ_clean, event, cfg)
 

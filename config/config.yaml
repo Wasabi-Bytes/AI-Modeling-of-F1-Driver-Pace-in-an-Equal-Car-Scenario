@@ -38,6 +38,9 @@ race_spline_df_tyre_age: 4
 race_spline_df_lap_num: 4
 race_spline_df_tyre_age_interact: 3
 race_use_compound_age_interaction: true
+race_spline_df_track_temp: 3                   # NEW
+race_use_temp_compound_interaction: false      # NEW
+
 
 # Optional feature toggles for README "expose all knobs"
 race_use_event_fe: true          # include C(event) in race models
