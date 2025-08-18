@@ -13,6 +13,13 @@ from load_data import load_config
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
 
+# Guardrail helpers (robust import for script/package runs)
+try:
+    from shrinkage_hier import cap_and_fuse_rq, apply_ess_shrinkage, apply_team_prior
+except ImportError:
+    from .shrinkage_hier import cap_and_fuse_rq, apply_ess_shrinkage, apply_team_prior
+
+
 
 # ---------- Paths ----------
 def _project_root() -> Path:
@@ -564,3 +571,32 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def assemble_driver_table(deltas: pd.DataFrame, n_eff: pd.DataFrame) -> pd.DataFrame:
+    """
+    deltas: DataFrame with columns ["Driver","Team","delta_R","se_R","delta_Q","se_Q"]
+    n_eff:  DataFrame with columns ["Driver","n_eff"]
+    Returns driver table with raw_est (R⊕Q), est_shrunk (ESS pull), optional team prior applied.
+    """
+    d = deltas.merge(n_eff, on="Driver", how="left")
+    d["n_eff"] = d["n_eff"].fillna(0).astype(float)
+
+    # Fuse race + quali with an SE floor (guardrail)
+    d = cap_and_fuse_rq(d)
+
+    # Mean-center raw_est (so 0 = field average)
+    field_mean = float(np.nanmean(d["raw_est"]))
+    d["raw_est"] = d["raw_est"] - field_mean
+
+    # ESS shrink (pull toward field mean = 0 after centering)
+    d = apply_ess_shrinkage(d, field_mean=0.0)
+
+    # Optional team prior (controlled in shrinkage_hier.py)
+    d = apply_team_prior(d)
+
+    keep = ["Driver", "Team", "n_eff", "raw_est", "est_shrunk", "driver_pace_final",
+            "raw_se", "alpha_ess", "alpha_team"]
+    for c in keep:
+        if c not in d.columns:
+            d[c] = np.nan
+    return d[keep].sort_values("driver_pace_final", ascending=True).reset_index(drop=True)
