@@ -78,8 +78,8 @@ def _curve_from_params(n_laps: int, params_obj: dict) -> np.ndarray:
     late = np.maximum(t - sw, 0.0) * l
     return early + late
 
-# Safety Car / VSC (unchanged)
-P_INCIDENT_PER_LAP = 0.03
+# Safety Car / VSC (configurable default)
+P_INCIDENT_PER_LAP_DEFAULT = 0.03
 SC_SHARE = 0.7
 VSC_SPEED_FACTOR = 0.65
 SC_SPEED_FACTOR = 0.50
@@ -718,8 +718,12 @@ def simulate_progress(
     cfg: Optional[dict] = None,
     meta: Optional[dict] = None,
     weather_summary: Optional[dict] = None,
+    incident_rate: float = P_INCIDENT_PER_LAP_DEFAULT,   # NEW
+    start_gain_sd_override: Optional[float] = None,       # NEW
+    disable_dnfs: bool = False,                           # NEW
     run_idx: int = 0,
 ):
+
     if cfg is None:
         cfg = {}
 
@@ -812,6 +816,8 @@ def simulate_progress(
     p_dnf_per_lap_vec = per_lap_dnf_probability(cfg, n_laps, risk if use_personality else None)
     if p_dnf_per_lap_vec.size == 1:
         p_dnf_per_lap_vec = np.repeat(p_dnf_per_lap_vec[0], D)
+    if disable_dnfs:
+        p_dnf_per_lap_vec[:] = 0.0
 
     # --- State ---
     curr_pts = np.zeros(D, dtype=float)
@@ -858,6 +864,8 @@ def simulate_progress(
 
     # --- Grid & start model ---
     base_start_sd = float(_cfg_get(cfg, ["starts", "start_gain_sd"], START_GAIN_SD))
+    if start_gain_sd_override is not None:
+        base_start_sd = float(start_gain_sd_override)
     rank_bias = float(_cfg_get(cfg, ["starts", "start_gain_rank_bias"], START_GAIN_RANK_BIAS))
     L0_speed = speed_pts_per_sec[0, :]
     ranks = np.arange(D, dtype=float)
@@ -964,7 +972,7 @@ def simulate_progress(
         leader_completed = int(curr_lap.max() if curr_lap.size else 0)
 
         # Incidents -> SC/VSC
-        if phase == "GREEN" and leader_completed > 0 and r_inc.random() < P_INCIDENT_PER_LAP:
+        if phase == "GREEN" and leader_completed > 0 and r_inc.random() < float(incident_rate):
             if r_inc.random() < SC_SHARE:
                 phase = "SC"
                 sc_laps_remaining = r_inc.integers(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
