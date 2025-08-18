@@ -1,80 +1,46 @@
-
 # Equal-Car F1 Driver Pace Modeling
 
-**What if every F1 driver raced in the same car?**
-This project estimates their **true pace** by stripping away constructor advantage and then visualizes an **equal-car race** with realistic degradation, overtaking, reliability, and track effects.
+**What if every F1 driver raced the same car?**
+This project estimates each driver’s **underlying pace** (independent of constructor) and replays an **equal-car race** with realistic tyre wear, overtaking, reliability, weather, and track effects.
 
 ---
 
-## Scope & Goals
+## Highlights
 
-* **Objective:** Measure each driver’s underlying pace, independent of car/team effects, and simulate equal-car racing dynamics.
-* **Data:** Last 10–12 Grands Prix, weighted by exponential recency decay (≈0.92) or **date half-life** (default ≈120 days).
-* **Sessions:** Race (R) and Qualifying (Q).
-* **Key Outputs:**
-
-  * Equal-car driver ranking (+ uncertainties)
-  * Per-event breakdown tables
-  * Equal-car race replay (`outputs/viz/simulation.html`)
-  * Monte-Carlo season outcomes (champion odds, win distributions)
-  * Calibration artifacts (degradation curves, driver personality)
-  * Diagnostics plots & consolidated tests
+* **Driver pace estimates** from Race ⊕ Quali with uncertainties & recency weighting.
+* **Equal-car replay**: DRS/dirty air, SC/VSC, DNFs, deterministic grid seeding.
+* **Weather-aware**: event medians merged; **track temperature** softly scales tyre degradation.
+* **Personality (optional)**: aggression ↑attempts, defence ↑holds, risk ↑DNF hazard.
+* **Track meta**: track type, downforce index, DRS zone count, speed bias, overtaking difficulty.
+* **Reproducible & logged**: per-event/per-run RNG streams and JSON run logs.
 
 ---
 
-## Pipeline
+## Data & Sources
 
-### 1) Data Loading & Tagging (trustworthy inputs)
-
-* Source: **FastF1** telemetry & session data.
-* A single boolean selects usable pace laps: `lap_ok = True` iff:
-
-  * Lap time exists and is positive
-  * Timing accurate (`IsAccurate == True`)
-  * Not an out-lap and not an in-lap (pit flags)
-  * Track green (`TrackStatus == "1"`)
-* Rows with `lap_ok == False` are dropped immediately after load.
-* **Stint hygiene** (when `Stint` missing): start a stint after pit exit; recompute **1-based** `lap_on_tyre`; validate monotonicity.
-* **Guaranteed columns** downstream: `Driver, Team, Event, Compound, Stint, lap_on_tyre, LapNumber, LapTimeSeconds, TrackStatus, lap_ok`.
-* **QA:** counts of dropped laps by reason; kept laps per event/team/driver.
-* **Track metadata:** `data/track_meta.csv` with
-  `event_key, track_type (street/permanent/hybrid), downforce_index [0–1], drs_zones, speed_bias, overtaking_difficulty`.
+* **FastF1** telemetry/session data (laps, segments, flags).
+* **Track metadata**: `data/track_meta.csv` (track\_type, downforce\_index, drs\_zones, speed\_bias, overtaking\_difficulty).
+* **Personality scores**: `outputs/calibration/personality.csv` with `driver, aggression, defence, risk ∈ [0,1]`.
 
 ---
 
-### 2) Race Metrics (robust & comparable)
+## Modeling Pipeline
 
-Two modeling paths (configurable):
+### 1) Data Loading & Tagging
 
-**a) Correction-Factor Model — `race_metrics_corrections_team`**
+Valid pace laps only (`lap_ok = True`): accurate timing, green track, not in/out-laps.
+Stint hygiene reconstructs `lap_on_tyre`. Event-level **weather\_summary** (medians) is attached.
 
-* Event fixed effects absorb cross-track difficulty.
-* Non-linear controls: splines for `lap_number` (fuel) & `lap_on_tyre` (degradation); `Compound` factor; optional interaction.
-* Outlier guard: driver×stint IQR trimming.
-* Normalize laps, then **team-demean** → driver race deltas.
-* **Uncertainty:** HC3 robust SEs.
+### 2) Race Metrics (configurable path)
 
-**b) OLS Team Model — `race_metrics_ols_team`**
-
-* Event FEs + team FEs + driver\@team FEs + smooth tyre/fuel controls + compound factor.
-* **Cluster-robust SEs** (driver×event clusters).
-* Deltas constructed from normalized (team-demeaned) laps.
-
-**Track effects (optional):**
-
-* If `track_effects.use: true`: add **archetype** FEs (street/permanent) or a smooth control for **downforce\_index**.
-* Event FEs remain to prevent cross-track leakage into driver deltas.
-
----
+* **Corrections model** (`race_metrics_corrections_team`) *or*
+* **OLS team model** (`race_metrics_ols_team`)
+  Both include event fixed effects, tyre/fuel splines, compound factor, robust SEs (cluster/HC3).
+  **Optional weather term:** small spline on `track_temp_c` (+ optional compound interaction).
 
 ### 3) Qualifying Metrics (evolution-aware)
 
-* Normalize **within Q1/Q2/Q3** by segment median.
-* Keep all valid laps; optional winsorization or “top-k after normalization.”
-* Best normalized lap per driver×segment; teammate gaps computed per segment.
-* **Precision combine** segments (inverse variance).
-
----
+Normalize per Q1/Q2/Q3; precision-combine best normalized lap per segment.
 
 ### 4) Event-Level Combination (Race ⊕ Quali)
 
@@ -82,130 +48,160 @@ Precision-weighted mean:
 
 $$
 \Delta_{\text{event}}
-= \frac{\Delta_R/\sigma_R^2 + \Delta_Q/\sigma_Q^2}{1/\sigma_R^2 + 1/\sigma_Q^2}, \quad
-\sigma_{\text{event}} = \sqrt{\frac{1}{1/\sigma_R^2 + 1/\sigma_Q^2}}.
+= \frac{\Delta_R/\sigma_R^2 + \Delta_Q/\sigma_Q^2}{1/\sigma_R^2 + 1/\sigma_Q^2},\qquad
+\sigma_{\text{event}} = \sqrt{\frac{1}{1/\sigma_R^2 + 1/\sigma_Q^2}} .
 $$
 
-* If one side missing, falls back naturally.
-* Effective weights reported.
-* **Shrinkage options:**
+### 5) Cross-Event Aggregation (global/archetype/forecast)
 
-  * Empirical Bayes (default), or
-  * **Hierarchical Bayesian** driver←team←field pooling when `use_hierarchical_shrinkage: true`.
-    Outputs add `*_delta_s_shrunk`, pooling factors, posterior SD.
+Weights combine inverse-variance, recency, and sample size:
 
----
+$$
+w_i \propto \frac{1}{\sigma_i^2}\;\cdot\;\underbrace{\lambda_i}_{\text{recency (half-life or decay)}}\;\cdot\;
+\underbrace{n_{i,\text{eff}}}_{\text{effective sample size}},\qquad \sum_i w_i = 1 .
+$$
 
-### 5) Cross-Event Aggregation (global + archetype + forecast)
+Outputs: **global** aggregates, **archetype** (e.g., street vs permanent), and an optional **forecast blend**:
 
-* Weighted by **inverse variance × recency decay (or date half-life) × effective sample size**.
-* Emit:
-
-  * **Global** aggregates (existing)
-  * **Archetype-specific** aggregates (e.g., street vs permanent; downforce buckets)
-  * **Forecast blend** for upcoming event:
-    $\Delta_{\text{forecast}} = \alpha \cdot \Delta_{\text{archetype}} + (1-\alpha)\cdot \Delta_{\text{global}}$ (configurable $\alpha$)
-* A per-event **weights table** is produced for transparency.
+$$
+\Delta_{\text{forecast}} = \alpha\,\Delta_{\text{archetype}} + (1-\alpha)\,\Delta_{\text{global}} .
+$$
 
 ---
 
-## Equal-Car Simulation (config-driven realism & diversity)
+## Equal-Car Simulation (math & mechanics)
 
 *(Implemented in `src/visualize_equal_race.py`)*
 
-* **Base pace:** circuit baseline + driver delta + noise.
-* **Calibrated tyre degradation:**
-  Reads `outputs/calibration/degradation_params.json` when `degradation.source: calibrated`, applying compound-specific piecewise curves; falls back to linear if disabled/missing.
-* **Reliability:** specify **per-race DNF rate** (e.g., 10% over \~70 laps) and convert to **per-lap hazard** internally.
-* **Overtaking:** logistic probability driven by **pace gap**, **DRS**, **defence**, **dirty-air penalty**, and **track meta**; **driver personality** modulates attempt/hold propensities.
-* **Personality (optional):**
-  `outputs/calibration/personality.csv` with normalized **aggression**, **defence**, **risk**:
+### Base Pace per Driver
 
-  * **Aggression:** ↑attempt rate
-  * **Defence:** ↑hold probability / fewer easy passes against
-  * **Risk:** scales DNF hazard around the base per-race target
-* **Event-specific deltas (optional):** use `event_delta_s_shrunk` instead of global aggregates.
-* **DRS zones:** automatically inferred from track geometry; count/strength can be tuned via `track_meta`.
-* **Deterministic but diverse RNG:**
-  Per-event/per-run streams (starts, lap noise, overtakes, DNFs, incidents) via seed mixing; same seed **and** run index → identical replay, different run index → diverse outcomes.
-* **Run logging:** `outputs/viz/simulation_run_log_run{idx}.json` with seed metadata, attempts, passes, DNFs, start gains, and **finish-order entropy**.
-* **Output:** `outputs/viz/simulation.html` (interactive Plotly replay).
+Per-lap pace (seconds) is:
+
+$$
+\text{LapTime}_{i\ell} = \underbrace{B_{\text{track}}}_{\text{base}} + 
+\underbrace{\Delta_i}_{\text{driver delta}} + 
+\underbrace{D_{\ell}^{(c_i)}}_{\text{degradation}} +
+\varepsilon_{i\ell},
+$$
+
+with small i.i.d. noise $\varepsilon_{i\ell}\sim \mathcal{N}(0,\sigma^2)$.
+Grid is seeded by $\Delta_i$ (faster → ahead) with a small staggered gap.
+
+### Tyre Degradation (piecewise + temperature)
+
+For compound $c$, piecewise-linear wear:
+
+$$
+D_{\ell}^{(c)} \;=\; m_T(c)\cdot s_c \cdot
+\big[e_c\,\min(\ell, \ell_{\text{sw},c})\;+\;l_c\,\max(0,\,\ell-\ell_{\text{sw},c})\big],
+$$
+
+where $e_c$ and $l_c$ are early/late slopes (s/lap), $\ell_{\text{sw},c}$ is the switch lap, $s_c$ is any compound scale.
+**Temperature multiplier** (small, bounded):
+
+$$
+m_T(c) \;=\; \mathrm{clip}\!\left(1 + s_c^{(T)}\,k\,(T_{\text{track}}-T_0),\, 1+\text{lo},\, 1+\text{hi}\right).
+$$
+
+### Overtaking Probability (DRS, personality, dirty air)
+
+At a DRS zone, follower $f$ vs leader $l$:
+
+$$
+p(\text{pass}) \;=\; \sigma\!\Big(
+\underbrace{\alpha_{\text{eff}}\,a_f}_{\text{attacker}}\cdot \Delta_{\text{norm}}
+\;+\; \beta\cdot\mathbf{1}_{\text{DRS}}
+\;-\; \underbrace{\gamma\,d_l}_{\text{defender}}
+\;-\; \delta_{\text{dirty}}
+\Big),
+$$
+
+* $\Delta_{\text{norm}} = \frac{\text{LapTime}_l - \text{LapTime}_f}{B_{\text{track}}}$ (positive if follower is faster),
+* $a_f = 1 + \kappa_A(\text{aggression}_f-0.5)$, $d_l = 1 + \kappa_D(\text{defence}_l-0.5)$,
+* $\alpha_{\text{eff}}$ scales with DRS zone *length* and *count*; $\delta_{\text{dirty}}$ increases with overtaking difficulty & downforce.
+
+### Reliability (DNF hazard with risk)
+
+User sets a **per-race DNF rate** $p_{\text{race}}$ over a typical length $L_{\text{typ}}$.
+Per-lap hazard:
+
+$$
+p_{\text{lap}} \;=\; 1 - (1 - p_{\text{race}})^{1/L_{\text{typ}}}.
+$$
+
+With **risk personality** (if enabled):
+
+$$
+p_{\text{race},i} \;=\; \mathrm{clip}\!\big(p_{\text{base}}\,[1 + \omega_R(\text{risk}_i-0.5)],\,0,\,0.9\big),\quad
+p_{\text{lap},i} = 1 - (1 - p_{\text{race},i})^{1/L_{\text{typ}}}.
+$$
+
+### Starts (small, personality-aware jitter)
+
+Start gain (sec) for driver $i$:
+
+$$
+g_i \sim \mathcal{N}\!\big(0,\;\sigma_{\text{start}}\cdot s_i^2\big) + b_{\text{rank}},\quad
+s_i = (1 + \eta_A(\text{aggression}_i-0.5))(1 - \eta_D(\text{defence}_i-0.5)).
+$$
+
+### Finish-Order Entropy (diversity diagnostic)
+
+Normalized inversion ratio between grid and finish orders (0 = no changes, 1 = full reversal).
+
+---
+
+## Configuration (key knobs)
+
+* **Weather**: merge tolerance; fields; temperature multiplier $(T_0,k,\text{clip})$.
+* **Race model**: spline dfs for tyre age/lap number/**track temp**; optional temp×compound interaction; robust SE type.
+* **Aggregation**: date half-life or recency decay; effective sample size.
+* **Degradation**: linear vs calibrated curves; compound mix/scale; track-type multipliers.
+* **Overtaking/DRS**: $\alpha,\beta,\gamma,\delta_{\text{dirty}}$; DRS detection threshold; track overrides; zone inference from geometry.
+* **Reliability**: per-race DNF rate and typical laps (implied per-lap hazard).
+* **Personality**: enable; weights $(\kappa_A,\kappa_D,\omega_R)$; CSV path for scores.
+* **Visualization**: base lap, laps, timestep, seed/run index, weather overlay.
 
 ---
 
 ## Quickstart
 
-1. **Install** dependencies (FastF1, pandas, numpy, statsmodels, plotly, etc.).
-2. **Prepare data:** run your existing data ingestion; ensure `data/track_meta.csv` exists.
-3. **Run equal-car replay:**
+1. Install deps (FastF1, pandas, numpy, statsmodels, plotly, etc.).
+2. Configure `config/config.yaml` (enable **weather** and **personality** as desired).
+3. Run the equal-car replay:
 
-```bash
-python -m src.visualize_equal_race
-# Output: outputs/viz/simulation.html
-# Log   : outputs/viz/simulation_run_log_run0.json
-```
-
-*Change `visualize_equal_race.seed` / `run_idx` in the config to reproduce or diversify runs.*
-
-## Diagnostics & Tests
-
-Consolidated into `tests/test_diagnostics_all.py`:
-
-* **Personality:**
-  Aggression increases pass success; defence reduces passes (symmetry checks).
-* **Hierarchical shrinkage:**
-  Posterior means lie between raw deltas and team/field means; pooling ↑ with higher SE.
-* **Degradation calibration:**
-  Calibrated compound curves reduce residuals vs linear; piecewise smoothness at knots.
-* **Track effects:**
-  Archetype aggregates differ from global in expected directions.
-* **RNG & diversity:**
-  Same seed+run index → identical outcomes; different run index → different outcomes; finish-order diversity guard; event-to-event differences align with `track_meta`.
-* **Viz smoke test:** figure builds without errors.
-
-All tests currently **pass** on recent weekend data + synthetic fixtures.
+   ```bash
+   python -m src.visualize_equal_race
+   # Output: outputs/viz/simulation.html
+   # Log   : outputs/viz/simulation_run_log_run0.json
+   ```
 
 ---
 
-## Deliverables
+## Outputs
 
-**Tables**
-
-* `outputs/aggregate/driver_ranking.csv`
-* `outputs/aggregate/event_breakdown.csv`
-* `outputs/aggregate/championship_mc_drivers.csv`
-* `outputs/aggregate/championship_mc_constructors.csv`
-
-**Calibration & Meta**
-
-* `outputs/calibration/degradation_params.json`
-* `outputs/calibration/personality.csv`
-* `data/track_meta.csv`
-
-**Visuals & Logs**
-
-* `outputs/viz/simulation.html` (equal-car replay)
-* `outputs/viz/simulation_run_log_run{idx}.json`
-* `outputs/diagnostics/…` (plots, if enabled)
+* **Tables**:
+  `outputs/aggregate/driver_ranking.csv`, per-event breakdowns, season MC summaries.
+* **Calibration & Meta**:
+  `outputs/calibration/degradation_params.json`, `outputs/calibration/personality.csv`, `data/track_meta.csv`.
+* **Replay & Logs**:
+  `outputs/viz/simulation.html`, `outputs/viz/simulation_run_log_run{idx}.json`.
+* **Diagnostics** (optional): plots under `outputs/diagnostics/`.
 
 ---
 
-## Limitations & Extensions
+## Limitations & Roadmap
 
-**Simplifications**
+* No explicit pit-strategy optimization (single-stint abstraction in replay).
+* Weather effects simplified to **track-temp scaling** (wind/humidity shown but not modeled yet).
+* Penalties/sprints currently excluded.
 
-* No explicit pit-strategy optimization
-* Weather not modeled; race evolution (beyond SC/VSC) simplified
-* Penalties/sprints excluded
-
-**Planned / Ongoing**
-
-* Additional diagnostics dashboards
+**Planned**: improved diagnostics dashboard
 
 ---
 
-## References
+## Credits
 
-* **Data:** FastF1
-* **Modeling:** statsmodels, scikit-learn
-* **Simulation:** Logistic overtaking with DRS & dirty-air; calibrated tyre degradation; Monte-Carlo outcomes
+* **Data**: FastF1
+* **Modeling**: statsmodels, scikit-learn
+* **Visualization**: Plotly / Matplotlib
