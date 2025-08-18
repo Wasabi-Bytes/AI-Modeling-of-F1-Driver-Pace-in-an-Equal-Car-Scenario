@@ -134,3 +134,64 @@ def hierarchical_shrink(
 
     meta = {"tau_team2": float(tau_team2), "tau_driver2": float(tau_driver2), "mu_field": float(mu_field)}
     return shrunk, b, post_sd, meta
+
+# ---- tiny guardrails used by season aggregation pipeline ----
+import numpy as np
+import pandas as pd
+
+# knobs
+N0_ESS = 300            # pseudo-laps to fully trust
+ESS_FLOOR = 50          # min assumed laps
+SE_FLOOR_FRAC = 0.035   # SE floor for R⊕Q fusion
+USE_TEAM_PRIOR = False
+TEAM_PRIOR_STRENGTH = 150
+
+def cap_and_fuse_rq(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Inputs (required): delta_R, se_R, delta_Q, se_Q
+    Output: adds raw_est, raw_se (inverse-variance fused with SE floor)
+    """
+    d = df.copy()
+    for c in ("se_R", "se_Q"):
+        d[c] = np.maximum(pd.to_numeric(d[c], errors="coerce"), SE_FLOOR_FRAC)
+    wR = 1.0 / (d["se_R"] ** 2)
+    wQ = 1.0 / (d["se_Q"] ** 2)
+    num = wR * pd.to_numeric(d["delta_R"], errors="coerce") + wQ * pd.to_numeric(d["delta_Q"], errors="coerce")
+    den = wR + wQ
+    d["raw_est"] = np.where(den > 0, num / den, 0.0)
+    d["raw_se"]  = np.sqrt(np.where(den > 0, 1.0 / den, np.inf))
+    return d
+
+def apply_ess_shrinkage(df: pd.DataFrame, field_mean: float = 0.0) -> pd.DataFrame:
+    """
+    Pull raw_est toward field_mean when n_eff is small.
+    alpha_ess = n_eff / (n_eff + N0_ESS), with floor on n_eff.
+    """
+    d = df.copy()
+    n = np.maximum(pd.to_numeric(d.get("n_eff", 0), errors="coerce").fillna(0.0), ESS_FLOOR)
+    alpha = n / (n + N0_ESS)
+    d["alpha_ess"] = alpha
+    d["est_shrunk"] = alpha * pd.to_numeric(d["raw_est"], errors="coerce") + (1.0 - alpha) * field_mean
+    return d
+
+def _team_col(df: pd.DataFrame) -> str:
+    return "Team" if "Team" in df.columns else ("team" if "team" in df.columns else "")
+
+def apply_team_prior(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Optional gentle pull toward team mean until laps accrue.
+    alpha_team = n_eff / (n_eff + TEAM_PRIOR_STRENGTH)
+    """
+    d = df.copy()
+    tcol = _team_col(d)
+    if not tcol or not USE_TEAM_PRIOR:
+        d["alpha_team"] = 1.0
+        d["driver_pace_final"] = d.get("est_shrunk", d.get("raw_est"))
+        return d
+
+    team_mean = d.groupby(tcol)["est_shrunk"].transform("mean")
+    n = np.maximum(pd.to_numeric(d.get("n_eff", 0), errors="coerce").fillna(0.0), 1.0)
+    alpha = n / (n + TEAM_PRIOR_STRENGTH)
+    d["alpha_team"] = alpha
+    d["driver_pace_final"] = alpha * d["est_shrunk"] + (1.0 - alpha) * team_mean
+    return d
