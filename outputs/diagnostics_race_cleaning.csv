@@ -1,24 +1,1152 @@
 driver,step,n,event
-ALB,raw,69,2025 Hungarian Grand Prix
-ALO,raw,70,2025 Hungarian Grand Prix
-ANT,raw,69,2025 Hungarian Grand Prix
-BEA,raw,48,2025 Hungarian Grand Prix
-BOR,raw,70,2025 Hungarian Grand Prix
-COL,raw,69,2025 Hungarian Grand Prix
-GAS,raw,69,2025 Hungarian Grand Prix
-HAD,raw,69,2025 Hungarian Grand Prix
-HAM,raw,69,2025 Hungarian Grand Prix
-HUL,raw,69,2025 Hungarian Grand Prix
-LAW,raw,70,2025 Hungarian Grand Prix
-LEC,raw,70,2025 Hungarian Grand Prix
-NOR,raw,70,2025 Hungarian Grand Prix
-OCO,raw,69,2025 Hungarian Grand Prix
-PIA,raw,70,2025 Hungarian Grand Prix
-RUS,raw,70,2025 Hungarian Grand Prix
-SAI,raw,69,2025 Hungarian Grand Prix
-STR,raw,70,2025 Hungarian Grand Prix
-TSU,raw,69,2025 Hungarian Grand Prix
-VER,raw,70,2025 Hungarian Grand Prix
+ALB,raw,34,2025 Australian Grand Prix
+ALO,raw,25,2025 Australian Grand Prix
+ANT,raw,34,2025 Australian Grand Prix
+BEA,raw,32,2025 Australian Grand Prix
+BOR,raw,27,2025 Australian Grand Prix
+GAS,raw,33,2025 Australian Grand Prix
+HAM,raw,34,2025 Australian Grand Prix
+HUL,raw,34,2025 Australian Grand Prix
+LAW,raw,28,2025 Australian Grand Prix
+LEC,raw,34,2025 Australian Grand Prix
+NOR,raw,35,2025 Australian Grand Prix
+OCO,raw,32,2025 Australian Grand Prix
+PIA,raw,34,2025 Australian Grand Prix
+RUS,raw,34,2025 Australian Grand Prix
+STR,raw,34,2025 Australian Grand Prix
+TSU,raw,34,2025 Australian Grand Prix
+VER,raw,33,2025 Australian Grand Prix
+ALB,accurate_valid,34,2025 Australian Grand Prix
+ALO,accurate_valid,25,2025 Australian Grand Prix
+ANT,accurate_valid,33,2025 Australian Grand Prix
+BEA,accurate_valid,32,2025 Australian Grand Prix
+BOR,accurate_valid,27,2025 Australian Grand Prix
+GAS,accurate_valid,32,2025 Australian Grand Prix
+HAM,accurate_valid,34,2025 Australian Grand Prix
+HUL,accurate_valid,34,2025 Australian Grand Prix
+LAW,accurate_valid,27,2025 Australian Grand Prix
+LEC,accurate_valid,34,2025 Australian Grand Prix
+NOR,accurate_valid,35,2025 Australian Grand Prix
+OCO,accurate_valid,32,2025 Australian Grand Prix
+PIA,accurate_valid,33,2025 Australian Grand Prix
+RUS,accurate_valid,34,2025 Australian Grand Prix
+STR,accurate_valid,34,2025 Australian Grand Prix
+TSU,accurate_valid,34,2025 Australian Grand Prix
+VER,accurate_valid,33,2025 Australian Grand Prix
+ALB,no_pits,34,2025 Australian Grand Prix
+ALO,no_pits,25,2025 Australian Grand Prix
+ANT,no_pits,33,2025 Australian Grand Prix
+BEA,no_pits,32,2025 Australian Grand Prix
+BOR,no_pits,27,2025 Australian Grand Prix
+GAS,no_pits,32,2025 Australian Grand Prix
+HAM,no_pits,34,2025 Australian Grand Prix
+HUL,no_pits,34,2025 Australian Grand Prix
+LAW,no_pits,27,2025 Australian Grand Prix
+LEC,no_pits,34,2025 Australian Grand Prix
+NOR,no_pits,35,2025 Australian Grand Prix
+OCO,no_pits,32,2025 Australian Grand Prix
+PIA,no_pits,33,2025 Australian Grand Prix
+RUS,no_pits,34,2025 Australian Grand Prix
+STR,no_pits,34,2025 Australian Grand Prix
+TSU,no_pits,34,2025 Australian Grand Prix
+VER,no_pits,33,2025 Australian Grand Prix
+ALB,bounds,34,2025 Australian Grand Prix
+ALO,bounds,25,2025 Australian Grand Prix
+ANT,bounds,33,2025 Australian Grand Prix
+BEA,bounds,32,2025 Australian Grand Prix
+BOR,bounds,27,2025 Australian Grand Prix
+GAS,bounds,32,2025 Australian Grand Prix
+HAM,bounds,34,2025 Australian Grand Prix
+HUL,bounds,34,2025 Australian Grand Prix
+LAW,bounds,27,2025 Australian Grand Prix
+LEC,bounds,34,2025 Australian Grand Prix
+NOR,bounds,35,2025 Australian Grand Prix
+OCO,bounds,32,2025 Australian Grand Prix
+PIA,bounds,33,2025 Australian Grand Prix
+RUS,bounds,34,2025 Australian Grand Prix
+STR,bounds,34,2025 Australian Grand Prix
+TSU,bounds,34,2025 Australian Grand Prix
+VER,bounds,33,2025 Australian Grand Prix
+ALB,no_sc_vsc,34,2025 Australian Grand Prix
+ALO,no_sc_vsc,25,2025 Australian Grand Prix
+ANT,no_sc_vsc,33,2025 Australian Grand Prix
+BEA,no_sc_vsc,32,2025 Australian Grand Prix
+BOR,no_sc_vsc,27,2025 Australian Grand Prix
+GAS,no_sc_vsc,32,2025 Australian Grand Prix
+HAM,no_sc_vsc,34,2025 Australian Grand Prix
+HUL,no_sc_vsc,34,2025 Australian Grand Prix
+LAW,no_sc_vsc,27,2025 Australian Grand Prix
+LEC,no_sc_vsc,34,2025 Australian Grand Prix
+NOR,no_sc_vsc,35,2025 Australian Grand Prix
+OCO,no_sc_vsc,32,2025 Australian Grand Prix
+PIA,no_sc_vsc,33,2025 Australian Grand Prix
+RUS,no_sc_vsc,34,2025 Australian Grand Prix
+STR,no_sc_vsc,34,2025 Australian Grand Prix
+TSU,no_sc_vsc,34,2025 Australian Grand Prix
+VER,no_sc_vsc,33,2025 Australian Grand Prix
+ALB,trimmed,30,2025 Australian Grand Prix
+ALO,trimmed,21,2025 Australian Grand Prix
+ANT,trimmed,29,2025 Australian Grand Prix
+BEA,trimmed,28,2025 Australian Grand Prix
+BOR,trimmed,23,2025 Australian Grand Prix
+GAS,trimmed,28,2025 Australian Grand Prix
+HAM,trimmed,30,2025 Australian Grand Prix
+HUL,trimmed,30,2025 Australian Grand Prix
+LAW,trimmed,23,2025 Australian Grand Prix
+LEC,trimmed,30,2025 Australian Grand Prix
+NOR,trimmed,31,2025 Australian Grand Prix
+OCO,trimmed,28,2025 Australian Grand Prix
+PIA,trimmed,29,2025 Australian Grand Prix
+RUS,trimmed,30,2025 Australian Grand Prix
+STR,trimmed,30,2025 Australian Grand Prix
+TSU,trimmed,30,2025 Australian Grand Prix
+VER,trimmed,29,2025 Australian Grand Prix
+ALB,raw,50,2025 Japanese Grand Prix
+ALO,raw,50,2025 Japanese Grand Prix
+ANT,raw,50,2025 Japanese Grand Prix
+BEA,raw,50,2025 Japanese Grand Prix
+BOR,raw,50,2025 Japanese Grand Prix
+DOO,raw,50,2025 Japanese Grand Prix
+GAS,raw,50,2025 Japanese Grand Prix
+HAD,raw,50,2025 Japanese Grand Prix
+HAM,raw,50,2025 Japanese Grand Prix
+HUL,raw,50,2025 Japanese Grand Prix
+LAW,raw,50,2025 Japanese Grand Prix
+LEC,raw,50,2025 Japanese Grand Prix
+NOR,raw,50,2025 Japanese Grand Prix
+OCO,raw,50,2025 Japanese Grand Prix
+PIA,raw,50,2025 Japanese Grand Prix
+RUS,raw,50,2025 Japanese Grand Prix
+SAI,raw,50,2025 Japanese Grand Prix
+STR,raw,47,2025 Japanese Grand Prix
+TSU,raw,50,2025 Japanese Grand Prix
+VER,raw,50,2025 Japanese Grand Prix
+ALB,accurate_valid,50,2025 Japanese Grand Prix
+ALO,accurate_valid,50,2025 Japanese Grand Prix
+ANT,accurate_valid,48,2025 Japanese Grand Prix
+BEA,accurate_valid,50,2025 Japanese Grand Prix
+BOR,accurate_valid,50,2025 Japanese Grand Prix
+DOO,accurate_valid,50,2025 Japanese Grand Prix
+GAS,accurate_valid,49,2025 Japanese Grand Prix
+HAD,accurate_valid,50,2025 Japanese Grand Prix
+HAM,accurate_valid,50,2025 Japanese Grand Prix
+HUL,accurate_valid,50,2025 Japanese Grand Prix
+LAW,accurate_valid,50,2025 Japanese Grand Prix
+LEC,accurate_valid,50,2025 Japanese Grand Prix
+NOR,accurate_valid,49,2025 Japanese Grand Prix
+OCO,accurate_valid,50,2025 Japanese Grand Prix
+PIA,accurate_valid,50,2025 Japanese Grand Prix
+RUS,accurate_valid,49,2025 Japanese Grand Prix
+SAI,accurate_valid,48,2025 Japanese Grand Prix
+STR,accurate_valid,47,2025 Japanese Grand Prix
+TSU,accurate_valid,49,2025 Japanese Grand Prix
+VER,accurate_valid,50,2025 Japanese Grand Prix
+ALB,no_pits,50,2025 Japanese Grand Prix
+ALO,no_pits,50,2025 Japanese Grand Prix
+ANT,no_pits,48,2025 Japanese Grand Prix
+BEA,no_pits,50,2025 Japanese Grand Prix
+BOR,no_pits,50,2025 Japanese Grand Prix
+DOO,no_pits,50,2025 Japanese Grand Prix
+GAS,no_pits,49,2025 Japanese Grand Prix
+HAD,no_pits,50,2025 Japanese Grand Prix
+HAM,no_pits,50,2025 Japanese Grand Prix
+HUL,no_pits,50,2025 Japanese Grand Prix
+LAW,no_pits,50,2025 Japanese Grand Prix
+LEC,no_pits,50,2025 Japanese Grand Prix
+NOR,no_pits,49,2025 Japanese Grand Prix
+OCO,no_pits,50,2025 Japanese Grand Prix
+PIA,no_pits,50,2025 Japanese Grand Prix
+RUS,no_pits,49,2025 Japanese Grand Prix
+SAI,no_pits,48,2025 Japanese Grand Prix
+STR,no_pits,47,2025 Japanese Grand Prix
+TSU,no_pits,49,2025 Japanese Grand Prix
+VER,no_pits,50,2025 Japanese Grand Prix
+ALB,bounds,50,2025 Japanese Grand Prix
+ALO,bounds,50,2025 Japanese Grand Prix
+ANT,bounds,48,2025 Japanese Grand Prix
+BEA,bounds,50,2025 Japanese Grand Prix
+BOR,bounds,50,2025 Japanese Grand Prix
+DOO,bounds,50,2025 Japanese Grand Prix
+GAS,bounds,49,2025 Japanese Grand Prix
+HAD,bounds,50,2025 Japanese Grand Prix
+HAM,bounds,50,2025 Japanese Grand Prix
+HUL,bounds,50,2025 Japanese Grand Prix
+LAW,bounds,50,2025 Japanese Grand Prix
+LEC,bounds,50,2025 Japanese Grand Prix
+NOR,bounds,49,2025 Japanese Grand Prix
+OCO,bounds,50,2025 Japanese Grand Prix
+PIA,bounds,50,2025 Japanese Grand Prix
+RUS,bounds,49,2025 Japanese Grand Prix
+SAI,bounds,48,2025 Japanese Grand Prix
+STR,bounds,47,2025 Japanese Grand Prix
+TSU,bounds,49,2025 Japanese Grand Prix
+VER,bounds,50,2025 Japanese Grand Prix
+ALB,no_sc_vsc,50,2025 Japanese Grand Prix
+ALO,no_sc_vsc,50,2025 Japanese Grand Prix
+ANT,no_sc_vsc,48,2025 Japanese Grand Prix
+BEA,no_sc_vsc,50,2025 Japanese Grand Prix
+BOR,no_sc_vsc,50,2025 Japanese Grand Prix
+DOO,no_sc_vsc,50,2025 Japanese Grand Prix
+GAS,no_sc_vsc,49,2025 Japanese Grand Prix
+HAD,no_sc_vsc,50,2025 Japanese Grand Prix
+HAM,no_sc_vsc,50,2025 Japanese Grand Prix
+HUL,no_sc_vsc,50,2025 Japanese Grand Prix
+LAW,no_sc_vsc,50,2025 Japanese Grand Prix
+LEC,no_sc_vsc,50,2025 Japanese Grand Prix
+NOR,no_sc_vsc,49,2025 Japanese Grand Prix
+OCO,no_sc_vsc,50,2025 Japanese Grand Prix
+PIA,no_sc_vsc,50,2025 Japanese Grand Prix
+RUS,no_sc_vsc,49,2025 Japanese Grand Prix
+SAI,no_sc_vsc,48,2025 Japanese Grand Prix
+STR,no_sc_vsc,47,2025 Japanese Grand Prix
+TSU,no_sc_vsc,49,2025 Japanese Grand Prix
+VER,no_sc_vsc,50,2025 Japanese Grand Prix
+ALB,trimmed,44,2025 Japanese Grand Prix
+ALO,trimmed,44,2025 Japanese Grand Prix
+ANT,trimmed,42,2025 Japanese Grand Prix
+BEA,trimmed,44,2025 Japanese Grand Prix
+BOR,trimmed,44,2025 Japanese Grand Prix
+DOO,trimmed,44,2025 Japanese Grand Prix
+GAS,trimmed,43,2025 Japanese Grand Prix
+HAD,trimmed,44,2025 Japanese Grand Prix
+HAM,trimmed,44,2025 Japanese Grand Prix
+HUL,trimmed,44,2025 Japanese Grand Prix
+LAW,trimmed,44,2025 Japanese Grand Prix
+LEC,trimmed,44,2025 Japanese Grand Prix
+NOR,trimmed,43,2025 Japanese Grand Prix
+OCO,trimmed,44,2025 Japanese Grand Prix
+PIA,trimmed,44,2025 Japanese Grand Prix
+RUS,trimmed,43,2025 Japanese Grand Prix
+SAI,trimmed,42,2025 Japanese Grand Prix
+STR,trimmed,41,2025 Japanese Grand Prix
+TSU,trimmed,43,2025 Japanese Grand Prix
+VER,trimmed,44,2025 Japanese Grand Prix
+ALB,raw,50,2025 Bahrain Grand Prix
+ALO,raw,50,2025 Bahrain Grand Prix
+ANT,raw,48,2025 Bahrain Grand Prix
+BEA,raw,50,2025 Bahrain Grand Prix
+BOR,raw,50,2025 Bahrain Grand Prix
+DOO,raw,48,2025 Bahrain Grand Prix
+GAS,raw,48,2025 Bahrain Grand Prix
+HAD,raw,48,2025 Bahrain Grand Prix
+HAM,raw,50,2025 Bahrain Grand Prix
+HUL,raw,48,2025 Bahrain Grand Prix
+LAW,raw,50,2025 Bahrain Grand Prix
+LEC,raw,50,2025 Bahrain Grand Prix
+NOR,raw,50,2025 Bahrain Grand Prix
+OCO,raw,48,2025 Bahrain Grand Prix
+PIA,raw,50,2025 Bahrain Grand Prix
+RUS,raw,30,2025 Bahrain Grand Prix
+SAI,raw,36,2025 Bahrain Grand Prix
+STR,raw,50,2025 Bahrain Grand Prix
+TSU,raw,50,2025 Bahrain Grand Prix
+VER,raw,48,2025 Bahrain Grand Prix
+ALB,accurate_valid,50,2025 Bahrain Grand Prix
+ALO,accurate_valid,49,2025 Bahrain Grand Prix
+ANT,accurate_valid,45,2025 Bahrain Grand Prix
+BEA,accurate_valid,48,2025 Bahrain Grand Prix
+BOR,accurate_valid,50,2025 Bahrain Grand Prix
+DOO,accurate_valid,44,2025 Bahrain Grand Prix
+GAS,accurate_valid,48,2025 Bahrain Grand Prix
+HAD,accurate_valid,45,2025 Bahrain Grand Prix
+HAM,accurate_valid,49,2025 Bahrain Grand Prix
+HUL,accurate_valid,47,2025 Bahrain Grand Prix
+LAW,accurate_valid,49,2025 Bahrain Grand Prix
+LEC,accurate_valid,49,2025 Bahrain Grand Prix
+NOR,accurate_valid,48,2025 Bahrain Grand Prix
+OCO,accurate_valid,48,2025 Bahrain Grand Prix
+PIA,accurate_valid,49,2025 Bahrain Grand Prix
+RUS,accurate_valid,30,2025 Bahrain Grand Prix
+SAI,accurate_valid,35,2025 Bahrain Grand Prix
+STR,accurate_valid,49,2025 Bahrain Grand Prix
+TSU,accurate_valid,47,2025 Bahrain Grand Prix
+VER,accurate_valid,45,2025 Bahrain Grand Prix
+ALB,no_pits,50,2025 Bahrain Grand Prix
+ALO,no_pits,49,2025 Bahrain Grand Prix
+ANT,no_pits,45,2025 Bahrain Grand Prix
+BEA,no_pits,48,2025 Bahrain Grand Prix
+BOR,no_pits,50,2025 Bahrain Grand Prix
+DOO,no_pits,44,2025 Bahrain Grand Prix
+GAS,no_pits,48,2025 Bahrain Grand Prix
+HAD,no_pits,45,2025 Bahrain Grand Prix
+HAM,no_pits,49,2025 Bahrain Grand Prix
+HUL,no_pits,47,2025 Bahrain Grand Prix
+LAW,no_pits,49,2025 Bahrain Grand Prix
+LEC,no_pits,49,2025 Bahrain Grand Prix
+NOR,no_pits,48,2025 Bahrain Grand Prix
+OCO,no_pits,48,2025 Bahrain Grand Prix
+PIA,no_pits,49,2025 Bahrain Grand Prix
+RUS,no_pits,30,2025 Bahrain Grand Prix
+SAI,no_pits,35,2025 Bahrain Grand Prix
+STR,no_pits,49,2025 Bahrain Grand Prix
+TSU,no_pits,47,2025 Bahrain Grand Prix
+VER,no_pits,45,2025 Bahrain Grand Prix
+ALB,bounds,50,2025 Bahrain Grand Prix
+ALO,bounds,49,2025 Bahrain Grand Prix
+ANT,bounds,45,2025 Bahrain Grand Prix
+BEA,bounds,48,2025 Bahrain Grand Prix
+BOR,bounds,50,2025 Bahrain Grand Prix
+DOO,bounds,44,2025 Bahrain Grand Prix
+GAS,bounds,48,2025 Bahrain Grand Prix
+HAD,bounds,45,2025 Bahrain Grand Prix
+HAM,bounds,49,2025 Bahrain Grand Prix
+HUL,bounds,47,2025 Bahrain Grand Prix
+LAW,bounds,49,2025 Bahrain Grand Prix
+LEC,bounds,49,2025 Bahrain Grand Prix
+NOR,bounds,48,2025 Bahrain Grand Prix
+OCO,bounds,48,2025 Bahrain Grand Prix
+PIA,bounds,49,2025 Bahrain Grand Prix
+RUS,bounds,30,2025 Bahrain Grand Prix
+SAI,bounds,35,2025 Bahrain Grand Prix
+STR,bounds,49,2025 Bahrain Grand Prix
+TSU,bounds,47,2025 Bahrain Grand Prix
+VER,bounds,45,2025 Bahrain Grand Prix
+ALB,no_sc_vsc,50,2025 Bahrain Grand Prix
+ALO,no_sc_vsc,49,2025 Bahrain Grand Prix
+ANT,no_sc_vsc,45,2025 Bahrain Grand Prix
+BEA,no_sc_vsc,48,2025 Bahrain Grand Prix
+BOR,no_sc_vsc,50,2025 Bahrain Grand Prix
+DOO,no_sc_vsc,44,2025 Bahrain Grand Prix
+GAS,no_sc_vsc,48,2025 Bahrain Grand Prix
+HAD,no_sc_vsc,45,2025 Bahrain Grand Prix
+HAM,no_sc_vsc,49,2025 Bahrain Grand Prix
+HUL,no_sc_vsc,47,2025 Bahrain Grand Prix
+LAW,no_sc_vsc,49,2025 Bahrain Grand Prix
+LEC,no_sc_vsc,49,2025 Bahrain Grand Prix
+NOR,no_sc_vsc,48,2025 Bahrain Grand Prix
+OCO,no_sc_vsc,48,2025 Bahrain Grand Prix
+PIA,no_sc_vsc,49,2025 Bahrain Grand Prix
+RUS,no_sc_vsc,30,2025 Bahrain Grand Prix
+SAI,no_sc_vsc,35,2025 Bahrain Grand Prix
+STR,no_sc_vsc,49,2025 Bahrain Grand Prix
+TSU,no_sc_vsc,47,2025 Bahrain Grand Prix
+VER,no_sc_vsc,45,2025 Bahrain Grand Prix
+ALB,trimmed,44,2025 Bahrain Grand Prix
+ALO,trimmed,43,2025 Bahrain Grand Prix
+ANT,trimmed,39,2025 Bahrain Grand Prix
+BEA,trimmed,42,2025 Bahrain Grand Prix
+BOR,trimmed,44,2025 Bahrain Grand Prix
+DOO,trimmed,38,2025 Bahrain Grand Prix
+GAS,trimmed,42,2025 Bahrain Grand Prix
+HAD,trimmed,39,2025 Bahrain Grand Prix
+HAM,trimmed,43,2025 Bahrain Grand Prix
+HUL,trimmed,41,2025 Bahrain Grand Prix
+LAW,trimmed,43,2025 Bahrain Grand Prix
+LEC,trimmed,43,2025 Bahrain Grand Prix
+NOR,trimmed,42,2025 Bahrain Grand Prix
+OCO,trimmed,42,2025 Bahrain Grand Prix
+PIA,trimmed,43,2025 Bahrain Grand Prix
+RUS,trimmed,26,2025 Bahrain Grand Prix
+SAI,trimmed,31,2025 Bahrain Grand Prix
+STR,trimmed,43,2025 Bahrain Grand Prix
+TSU,trimmed,41,2025 Bahrain Grand Prix
+VER,trimmed,39,2025 Bahrain Grand Prix
+ALB,raw,45,2025 Saudi Arabian Grand Prix
+ALO,raw,45,2025 Saudi Arabian Grand Prix
+ANT,raw,45,2025 Saudi Arabian Grand Prix
+BEA,raw,45,2025 Saudi Arabian Grand Prix
+BOR,raw,46,2025 Saudi Arabian Grand Prix
+DOO,raw,44,2025 Saudi Arabian Grand Prix
+HAD,raw,45,2025 Saudi Arabian Grand Prix
+HAM,raw,45,2025 Saudi Arabian Grand Prix
+HUL,raw,44,2025 Saudi Arabian Grand Prix
+LAW,raw,45,2025 Saudi Arabian Grand Prix
+LEC,raw,45,2025 Saudi Arabian Grand Prix
+NOR,raw,45,2025 Saudi Arabian Grand Prix
+OCO,raw,47,2025 Saudi Arabian Grand Prix
+PIA,raw,45,2025 Saudi Arabian Grand Prix
+RUS,raw,45,2025 Saudi Arabian Grand Prix
+SAI,raw,45,2025 Saudi Arabian Grand Prix
+STR,raw,44,2025 Saudi Arabian Grand Prix
+VER,raw,45,2025 Saudi Arabian Grand Prix
+ALB,accurate_valid,44,2025 Saudi Arabian Grand Prix
+ALO,accurate_valid,44,2025 Saudi Arabian Grand Prix
+ANT,accurate_valid,44,2025 Saudi Arabian Grand Prix
+BEA,accurate_valid,45,2025 Saudi Arabian Grand Prix
+BOR,accurate_valid,44,2025 Saudi Arabian Grand Prix
+DOO,accurate_valid,44,2025 Saudi Arabian Grand Prix
+HAD,accurate_valid,43,2025 Saudi Arabian Grand Prix
+HAM,accurate_valid,44,2025 Saudi Arabian Grand Prix
+HUL,accurate_valid,44,2025 Saudi Arabian Grand Prix
+LAW,accurate_valid,43,2025 Saudi Arabian Grand Prix
+LEC,accurate_valid,45,2025 Saudi Arabian Grand Prix
+NOR,accurate_valid,44,2025 Saudi Arabian Grand Prix
+OCO,accurate_valid,47,2025 Saudi Arabian Grand Prix
+PIA,accurate_valid,45,2025 Saudi Arabian Grand Prix
+RUS,accurate_valid,45,2025 Saudi Arabian Grand Prix
+SAI,accurate_valid,45,2025 Saudi Arabian Grand Prix
+STR,accurate_valid,43,2025 Saudi Arabian Grand Prix
+VER,accurate_valid,45,2025 Saudi Arabian Grand Prix
+ALB,no_pits,44,2025 Saudi Arabian Grand Prix
+ALO,no_pits,44,2025 Saudi Arabian Grand Prix
+ANT,no_pits,44,2025 Saudi Arabian Grand Prix
+BEA,no_pits,45,2025 Saudi Arabian Grand Prix
+BOR,no_pits,44,2025 Saudi Arabian Grand Prix
+DOO,no_pits,44,2025 Saudi Arabian Grand Prix
+HAD,no_pits,43,2025 Saudi Arabian Grand Prix
+HAM,no_pits,44,2025 Saudi Arabian Grand Prix
+HUL,no_pits,44,2025 Saudi Arabian Grand Prix
+LAW,no_pits,43,2025 Saudi Arabian Grand Prix
+LEC,no_pits,45,2025 Saudi Arabian Grand Prix
+NOR,no_pits,44,2025 Saudi Arabian Grand Prix
+OCO,no_pits,47,2025 Saudi Arabian Grand Prix
+PIA,no_pits,45,2025 Saudi Arabian Grand Prix
+RUS,no_pits,45,2025 Saudi Arabian Grand Prix
+SAI,no_pits,45,2025 Saudi Arabian Grand Prix
+STR,no_pits,43,2025 Saudi Arabian Grand Prix
+VER,no_pits,45,2025 Saudi Arabian Grand Prix
+ALB,bounds,44,2025 Saudi Arabian Grand Prix
+ALO,bounds,44,2025 Saudi Arabian Grand Prix
+ANT,bounds,44,2025 Saudi Arabian Grand Prix
+BEA,bounds,45,2025 Saudi Arabian Grand Prix
+BOR,bounds,44,2025 Saudi Arabian Grand Prix
+DOO,bounds,44,2025 Saudi Arabian Grand Prix
+HAD,bounds,43,2025 Saudi Arabian Grand Prix
+HAM,bounds,44,2025 Saudi Arabian Grand Prix
+HUL,bounds,44,2025 Saudi Arabian Grand Prix
+LAW,bounds,43,2025 Saudi Arabian Grand Prix
+LEC,bounds,45,2025 Saudi Arabian Grand Prix
+NOR,bounds,44,2025 Saudi Arabian Grand Prix
+OCO,bounds,47,2025 Saudi Arabian Grand Prix
+PIA,bounds,45,2025 Saudi Arabian Grand Prix
+RUS,bounds,45,2025 Saudi Arabian Grand Prix
+SAI,bounds,45,2025 Saudi Arabian Grand Prix
+STR,bounds,43,2025 Saudi Arabian Grand Prix
+VER,bounds,45,2025 Saudi Arabian Grand Prix
+ALB,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+ALO,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+ANT,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+BEA,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+BOR,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+DOO,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+HAD,no_sc_vsc,43,2025 Saudi Arabian Grand Prix
+HAM,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+HUL,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+LAW,no_sc_vsc,43,2025 Saudi Arabian Grand Prix
+LEC,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+NOR,no_sc_vsc,44,2025 Saudi Arabian Grand Prix
+OCO,no_sc_vsc,47,2025 Saudi Arabian Grand Prix
+PIA,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+RUS,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+SAI,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+STR,no_sc_vsc,43,2025 Saudi Arabian Grand Prix
+VER,no_sc_vsc,45,2025 Saudi Arabian Grand Prix
+ALB,trimmed,38,2025 Saudi Arabian Grand Prix
+ALO,trimmed,38,2025 Saudi Arabian Grand Prix
+ANT,trimmed,38,2025 Saudi Arabian Grand Prix
+BEA,trimmed,39,2025 Saudi Arabian Grand Prix
+BOR,trimmed,38,2025 Saudi Arabian Grand Prix
+DOO,trimmed,38,2025 Saudi Arabian Grand Prix
+HAD,trimmed,37,2025 Saudi Arabian Grand Prix
+HAM,trimmed,38,2025 Saudi Arabian Grand Prix
+HUL,trimmed,38,2025 Saudi Arabian Grand Prix
+LAW,trimmed,37,2025 Saudi Arabian Grand Prix
+LEC,trimmed,39,2025 Saudi Arabian Grand Prix
+NOR,trimmed,38,2025 Saudi Arabian Grand Prix
+OCO,trimmed,41,2025 Saudi Arabian Grand Prix
+PIA,trimmed,39,2025 Saudi Arabian Grand Prix
+RUS,trimmed,39,2025 Saudi Arabian Grand Prix
+SAI,trimmed,39,2025 Saudi Arabian Grand Prix
+STR,trimmed,37,2025 Saudi Arabian Grand Prix
+VER,trimmed,39,2025 Saudi Arabian Grand Prix
+ALB,raw,50,2025 Emilia Romagna Grand Prix
+ALO,raw,47,2025 Emilia Romagna Grand Prix
+ANT,raw,40,2025 Emilia Romagna Grand Prix
+BEA,raw,48,2025 Emilia Romagna Grand Prix
+BOR,raw,48,2025 Emilia Romagna Grand Prix
+COL,raw,48,2025 Emilia Romagna Grand Prix
+GAS,raw,48,2025 Emilia Romagna Grand Prix
+HAD,raw,50,2025 Emilia Romagna Grand Prix
+HAM,raw,50,2025 Emilia Romagna Grand Prix
+HUL,raw,49,2025 Emilia Romagna Grand Prix
+LAW,raw,48,2025 Emilia Romagna Grand Prix
+LEC,raw,48,2025 Emilia Romagna Grand Prix
+NOR,raw,50,2025 Emilia Romagna Grand Prix
+OCO,raw,25,2025 Emilia Romagna Grand Prix
+PIA,raw,49,2025 Emilia Romagna Grand Prix
+RUS,raw,48,2025 Emilia Romagna Grand Prix
+SAI,raw,48,2025 Emilia Romagna Grand Prix
+STR,raw,47,2025 Emilia Romagna Grand Prix
+TSU,raw,50,2025 Emilia Romagna Grand Prix
+VER,raw,51,2025 Emilia Romagna Grand Prix
+ALB,accurate_valid,49,2025 Emilia Romagna Grand Prix
+ALO,accurate_valid,47,2025 Emilia Romagna Grand Prix
+ANT,accurate_valid,40,2025 Emilia Romagna Grand Prix
+BEA,accurate_valid,48,2025 Emilia Romagna Grand Prix
+BOR,accurate_valid,48,2025 Emilia Romagna Grand Prix
+COL,accurate_valid,48,2025 Emilia Romagna Grand Prix
+GAS,accurate_valid,46,2025 Emilia Romagna Grand Prix
+HAD,accurate_valid,50,2025 Emilia Romagna Grand Prix
+HAM,accurate_valid,50,2025 Emilia Romagna Grand Prix
+HUL,accurate_valid,49,2025 Emilia Romagna Grand Prix
+LAW,accurate_valid,48,2025 Emilia Romagna Grand Prix
+LEC,accurate_valid,48,2025 Emilia Romagna Grand Prix
+NOR,accurate_valid,50,2025 Emilia Romagna Grand Prix
+OCO,accurate_valid,25,2025 Emilia Romagna Grand Prix
+PIA,accurate_valid,49,2025 Emilia Romagna Grand Prix
+RUS,accurate_valid,48,2025 Emilia Romagna Grand Prix
+SAI,accurate_valid,48,2025 Emilia Romagna Grand Prix
+STR,accurate_valid,47,2025 Emilia Romagna Grand Prix
+TSU,accurate_valid,50,2025 Emilia Romagna Grand Prix
+VER,accurate_valid,51,2025 Emilia Romagna Grand Prix
+ALB,no_pits,49,2025 Emilia Romagna Grand Prix
+ALO,no_pits,47,2025 Emilia Romagna Grand Prix
+ANT,no_pits,40,2025 Emilia Romagna Grand Prix
+BEA,no_pits,48,2025 Emilia Romagna Grand Prix
+BOR,no_pits,48,2025 Emilia Romagna Grand Prix
+COL,no_pits,48,2025 Emilia Romagna Grand Prix
+GAS,no_pits,46,2025 Emilia Romagna Grand Prix
+HAD,no_pits,50,2025 Emilia Romagna Grand Prix
+HAM,no_pits,50,2025 Emilia Romagna Grand Prix
+HUL,no_pits,49,2025 Emilia Romagna Grand Prix
+LAW,no_pits,48,2025 Emilia Romagna Grand Prix
+LEC,no_pits,48,2025 Emilia Romagna Grand Prix
+NOR,no_pits,50,2025 Emilia Romagna Grand Prix
+OCO,no_pits,25,2025 Emilia Romagna Grand Prix
+PIA,no_pits,49,2025 Emilia Romagna Grand Prix
+RUS,no_pits,48,2025 Emilia Romagna Grand Prix
+SAI,no_pits,48,2025 Emilia Romagna Grand Prix
+STR,no_pits,47,2025 Emilia Romagna Grand Prix
+TSU,no_pits,50,2025 Emilia Romagna Grand Prix
+VER,no_pits,51,2025 Emilia Romagna Grand Prix
+ALB,bounds,49,2025 Emilia Romagna Grand Prix
+ALO,bounds,47,2025 Emilia Romagna Grand Prix
+ANT,bounds,40,2025 Emilia Romagna Grand Prix
+BEA,bounds,48,2025 Emilia Romagna Grand Prix
+BOR,bounds,48,2025 Emilia Romagna Grand Prix
+COL,bounds,48,2025 Emilia Romagna Grand Prix
+GAS,bounds,46,2025 Emilia Romagna Grand Prix
+HAD,bounds,50,2025 Emilia Romagna Grand Prix
+HAM,bounds,50,2025 Emilia Romagna Grand Prix
+HUL,bounds,49,2025 Emilia Romagna Grand Prix
+LAW,bounds,48,2025 Emilia Romagna Grand Prix
+LEC,bounds,48,2025 Emilia Romagna Grand Prix
+NOR,bounds,50,2025 Emilia Romagna Grand Prix
+OCO,bounds,25,2025 Emilia Romagna Grand Prix
+PIA,bounds,49,2025 Emilia Romagna Grand Prix
+RUS,bounds,48,2025 Emilia Romagna Grand Prix
+SAI,bounds,48,2025 Emilia Romagna Grand Prix
+STR,bounds,47,2025 Emilia Romagna Grand Prix
+TSU,bounds,50,2025 Emilia Romagna Grand Prix
+VER,bounds,51,2025 Emilia Romagna Grand Prix
+ALB,no_sc_vsc,49,2025 Emilia Romagna Grand Prix
+ALO,no_sc_vsc,47,2025 Emilia Romagna Grand Prix
+ANT,no_sc_vsc,40,2025 Emilia Romagna Grand Prix
+BEA,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+BOR,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+COL,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+GAS,no_sc_vsc,46,2025 Emilia Romagna Grand Prix
+HAD,no_sc_vsc,50,2025 Emilia Romagna Grand Prix
+HAM,no_sc_vsc,50,2025 Emilia Romagna Grand Prix
+HUL,no_sc_vsc,49,2025 Emilia Romagna Grand Prix
+LAW,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+LEC,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+NOR,no_sc_vsc,50,2025 Emilia Romagna Grand Prix
+OCO,no_sc_vsc,25,2025 Emilia Romagna Grand Prix
+PIA,no_sc_vsc,49,2025 Emilia Romagna Grand Prix
+RUS,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+SAI,no_sc_vsc,48,2025 Emilia Romagna Grand Prix
+STR,no_sc_vsc,47,2025 Emilia Romagna Grand Prix
+TSU,no_sc_vsc,50,2025 Emilia Romagna Grand Prix
+VER,no_sc_vsc,51,2025 Emilia Romagna Grand Prix
+ALB,trimmed,43,2025 Emilia Romagna Grand Prix
+ALO,trimmed,41,2025 Emilia Romagna Grand Prix
+ANT,trimmed,36,2025 Emilia Romagna Grand Prix
+BEA,trimmed,42,2025 Emilia Romagna Grand Prix
+BOR,trimmed,42,2025 Emilia Romagna Grand Prix
+COL,trimmed,42,2025 Emilia Romagna Grand Prix
+GAS,trimmed,40,2025 Emilia Romagna Grand Prix
+HAD,trimmed,44,2025 Emilia Romagna Grand Prix
+HAM,trimmed,44,2025 Emilia Romagna Grand Prix
+HUL,trimmed,43,2025 Emilia Romagna Grand Prix
+LAW,trimmed,42,2025 Emilia Romagna Grand Prix
+LEC,trimmed,42,2025 Emilia Romagna Grand Prix
+NOR,trimmed,44,2025 Emilia Romagna Grand Prix
+OCO,trimmed,21,2025 Emilia Romagna Grand Prix
+PIA,trimmed,43,2025 Emilia Romagna Grand Prix
+RUS,trimmed,42,2025 Emilia Romagna Grand Prix
+SAI,trimmed,42,2025 Emilia Romagna Grand Prix
+STR,trimmed,41,2025 Emilia Romagna Grand Prix
+TSU,trimmed,44,2025 Emilia Romagna Grand Prix
+VER,trimmed,45,2025 Emilia Romagna Grand Prix
+ALB,raw,63,2025 Monaco Grand Prix
+ALO,raw,26,2025 Monaco Grand Prix
+ANT,raw,62,2025 Monaco Grand Prix
+BEA,raw,65,2025 Monaco Grand Prix
+BOR,raw,63,2025 Monaco Grand Prix
+COL,raw,63,2025 Monaco Grand Prix
+GAS,raw,3,2025 Monaco Grand Prix
+HAD,raw,64,2025 Monaco Grand Prix
+HAM,raw,65,2025 Monaco Grand Prix
+HUL,raw,63,2025 Monaco Grand Prix
+LAW,raw,64,2025 Monaco Grand Prix
+LEC,raw,65,2025 Monaco Grand Prix
+NOR,raw,65,2025 Monaco Grand Prix
+OCO,raw,64,2025 Monaco Grand Prix
+PIA,raw,65,2025 Monaco Grand Prix
+RUS,raw,61,2025 Monaco Grand Prix
+SAI,raw,63,2025 Monaco Grand Prix
+STR,raw,63,2025 Monaco Grand Prix
+TSU,raw,65,2025 Monaco Grand Prix
+VER,raw,65,2025 Monaco Grand Prix
+ALB,accurate_valid,63,2025 Monaco Grand Prix
+ALO,accurate_valid,26,2025 Monaco Grand Prix
+ANT,accurate_valid,60,2025 Monaco Grand Prix
+BEA,accurate_valid,63,2025 Monaco Grand Prix
+BOR,accurate_valid,63,2025 Monaco Grand Prix
+COL,accurate_valid,63,2025 Monaco Grand Prix
+GAS,accurate_valid,3,2025 Monaco Grand Prix
+HAD,accurate_valid,64,2025 Monaco Grand Prix
+HAM,accurate_valid,64,2025 Monaco Grand Prix
+HUL,accurate_valid,61,2025 Monaco Grand Prix
+LAW,accurate_valid,64,2025 Monaco Grand Prix
+LEC,accurate_valid,64,2025 Monaco Grand Prix
+NOR,accurate_valid,65,2025 Monaco Grand Prix
+OCO,accurate_valid,64,2025 Monaco Grand Prix
+PIA,accurate_valid,65,2025 Monaco Grand Prix
+RUS,accurate_valid,59,2025 Monaco Grand Prix
+SAI,accurate_valid,63,2025 Monaco Grand Prix
+STR,accurate_valid,62,2025 Monaco Grand Prix
+TSU,accurate_valid,65,2025 Monaco Grand Prix
+VER,accurate_valid,64,2025 Monaco Grand Prix
+ALB,no_pits,63,2025 Monaco Grand Prix
+ALO,no_pits,26,2025 Monaco Grand Prix
+ANT,no_pits,60,2025 Monaco Grand Prix
+BEA,no_pits,63,2025 Monaco Grand Prix
+BOR,no_pits,63,2025 Monaco Grand Prix
+COL,no_pits,63,2025 Monaco Grand Prix
+GAS,no_pits,3,2025 Monaco Grand Prix
+HAD,no_pits,64,2025 Monaco Grand Prix
+HAM,no_pits,64,2025 Monaco Grand Prix
+HUL,no_pits,61,2025 Monaco Grand Prix
+LAW,no_pits,64,2025 Monaco Grand Prix
+LEC,no_pits,64,2025 Monaco Grand Prix
+NOR,no_pits,65,2025 Monaco Grand Prix
+OCO,no_pits,64,2025 Monaco Grand Prix
+PIA,no_pits,65,2025 Monaco Grand Prix
+RUS,no_pits,59,2025 Monaco Grand Prix
+SAI,no_pits,63,2025 Monaco Grand Prix
+STR,no_pits,62,2025 Monaco Grand Prix
+TSU,no_pits,65,2025 Monaco Grand Prix
+VER,no_pits,64,2025 Monaco Grand Prix
+ALB,bounds,63,2025 Monaco Grand Prix
+ALO,bounds,26,2025 Monaco Grand Prix
+ANT,bounds,60,2025 Monaco Grand Prix
+BEA,bounds,63,2025 Monaco Grand Prix
+BOR,bounds,63,2025 Monaco Grand Prix
+COL,bounds,63,2025 Monaco Grand Prix
+GAS,bounds,3,2025 Monaco Grand Prix
+HAD,bounds,64,2025 Monaco Grand Prix
+HAM,bounds,64,2025 Monaco Grand Prix
+HUL,bounds,61,2025 Monaco Grand Prix
+LAW,bounds,64,2025 Monaco Grand Prix
+LEC,bounds,64,2025 Monaco Grand Prix
+NOR,bounds,65,2025 Monaco Grand Prix
+OCO,bounds,64,2025 Monaco Grand Prix
+PIA,bounds,65,2025 Monaco Grand Prix
+RUS,bounds,59,2025 Monaco Grand Prix
+SAI,bounds,63,2025 Monaco Grand Prix
+STR,bounds,62,2025 Monaco Grand Prix
+TSU,bounds,65,2025 Monaco Grand Prix
+VER,bounds,64,2025 Monaco Grand Prix
+ALB,no_sc_vsc,63,2025 Monaco Grand Prix
+ALO,no_sc_vsc,26,2025 Monaco Grand Prix
+ANT,no_sc_vsc,60,2025 Monaco Grand Prix
+BEA,no_sc_vsc,63,2025 Monaco Grand Prix
+BOR,no_sc_vsc,63,2025 Monaco Grand Prix
+COL,no_sc_vsc,63,2025 Monaco Grand Prix
+GAS,no_sc_vsc,3,2025 Monaco Grand Prix
+HAD,no_sc_vsc,64,2025 Monaco Grand Prix
+HAM,no_sc_vsc,64,2025 Monaco Grand Prix
+HUL,no_sc_vsc,61,2025 Monaco Grand Prix
+LAW,no_sc_vsc,64,2025 Monaco Grand Prix
+LEC,no_sc_vsc,64,2025 Monaco Grand Prix
+NOR,no_sc_vsc,65,2025 Monaco Grand Prix
+OCO,no_sc_vsc,64,2025 Monaco Grand Prix
+PIA,no_sc_vsc,65,2025 Monaco Grand Prix
+RUS,no_sc_vsc,59,2025 Monaco Grand Prix
+SAI,no_sc_vsc,63,2025 Monaco Grand Prix
+STR,no_sc_vsc,62,2025 Monaco Grand Prix
+TSU,no_sc_vsc,65,2025 Monaco Grand Prix
+VER,no_sc_vsc,64,2025 Monaco Grand Prix
+ALB,trimmed,55,2025 Monaco Grand Prix
+ALO,trimmed,22,2025 Monaco Grand Prix
+ANT,trimmed,54,2025 Monaco Grand Prix
+BEA,trimmed,55,2025 Monaco Grand Prix
+BOR,trimmed,55,2025 Monaco Grand Prix
+COL,trimmed,55,2025 Monaco Grand Prix
+GAS,trimmed,3,2025 Monaco Grand Prix
+HAD,trimmed,56,2025 Monaco Grand Prix
+HAM,trimmed,56,2025 Monaco Grand Prix
+HUL,trimmed,55,2025 Monaco Grand Prix
+LAW,trimmed,56,2025 Monaco Grand Prix
+LEC,trimmed,56,2025 Monaco Grand Prix
+NOR,trimmed,57,2025 Monaco Grand Prix
+OCO,trimmed,56,2025 Monaco Grand Prix
+PIA,trimmed,57,2025 Monaco Grand Prix
+RUS,trimmed,53,2025 Monaco Grand Prix
+SAI,trimmed,55,2025 Monaco Grand Prix
+STR,trimmed,54,2025 Monaco Grand Prix
+TSU,trimmed,57,2025 Monaco Grand Prix
+VER,trimmed,56,2025 Monaco Grand Prix
+ALB,raw,22,2025 Spanish Grand Prix
+ALO,raw,54,2025 Spanish Grand Prix
+ANT,raw,48,2025 Spanish Grand Prix
+BEA,raw,54,2025 Spanish Grand Prix
+BOR,raw,54,2025 Spanish Grand Prix
+COL,raw,53,2025 Spanish Grand Prix
+GAS,raw,54,2025 Spanish Grand Prix
+HAD,raw,54,2025 Spanish Grand Prix
+HAM,raw,55,2025 Spanish Grand Prix
+HUL,raw,54,2025 Spanish Grand Prix
+LAW,raw,54,2025 Spanish Grand Prix
+LEC,raw,55,2025 Spanish Grand Prix
+NOR,raw,55,2025 Spanish Grand Prix
+OCO,raw,54,2025 Spanish Grand Prix
+PIA,raw,55,2025 Spanish Grand Prix
+RUS,raw,55,2025 Spanish Grand Prix
+SAI,raw,54,2025 Spanish Grand Prix
+TSU,raw,52,2025 Spanish Grand Prix
+VER,raw,53,2025 Spanish Grand Prix
+ALB,accurate_valid,21,2025 Spanish Grand Prix
+ALO,accurate_valid,53,2025 Spanish Grand Prix
+ANT,accurate_valid,46,2025 Spanish Grand Prix
+BEA,accurate_valid,52,2025 Spanish Grand Prix
+BOR,accurate_valid,54,2025 Spanish Grand Prix
+COL,accurate_valid,52,2025 Spanish Grand Prix
+GAS,accurate_valid,54,2025 Spanish Grand Prix
+HAD,accurate_valid,54,2025 Spanish Grand Prix
+HAM,accurate_valid,55,2025 Spanish Grand Prix
+HUL,accurate_valid,54,2025 Spanish Grand Prix
+LAW,accurate_valid,53,2025 Spanish Grand Prix
+LEC,accurate_valid,55,2025 Spanish Grand Prix
+NOR,accurate_valid,55,2025 Spanish Grand Prix
+OCO,accurate_valid,54,2025 Spanish Grand Prix
+PIA,accurate_valid,55,2025 Spanish Grand Prix
+RUS,accurate_valid,55,2025 Spanish Grand Prix
+SAI,accurate_valid,54,2025 Spanish Grand Prix
+TSU,accurate_valid,52,2025 Spanish Grand Prix
+VER,accurate_valid,52,2025 Spanish Grand Prix
+ALB,no_pits,21,2025 Spanish Grand Prix
+ALO,no_pits,53,2025 Spanish Grand Prix
+ANT,no_pits,46,2025 Spanish Grand Prix
+BEA,no_pits,52,2025 Spanish Grand Prix
+BOR,no_pits,54,2025 Spanish Grand Prix
+COL,no_pits,52,2025 Spanish Grand Prix
+GAS,no_pits,54,2025 Spanish Grand Prix
+HAD,no_pits,54,2025 Spanish Grand Prix
+HAM,no_pits,55,2025 Spanish Grand Prix
+HUL,no_pits,54,2025 Spanish Grand Prix
+LAW,no_pits,53,2025 Spanish Grand Prix
+LEC,no_pits,55,2025 Spanish Grand Prix
+NOR,no_pits,55,2025 Spanish Grand Prix
+OCO,no_pits,54,2025 Spanish Grand Prix
+PIA,no_pits,55,2025 Spanish Grand Prix
+RUS,no_pits,55,2025 Spanish Grand Prix
+SAI,no_pits,54,2025 Spanish Grand Prix
+TSU,no_pits,52,2025 Spanish Grand Prix
+VER,no_pits,52,2025 Spanish Grand Prix
+ALB,bounds,21,2025 Spanish Grand Prix
+ALO,bounds,53,2025 Spanish Grand Prix
+ANT,bounds,46,2025 Spanish Grand Prix
+BEA,bounds,52,2025 Spanish Grand Prix
+BOR,bounds,54,2025 Spanish Grand Prix
+COL,bounds,52,2025 Spanish Grand Prix
+GAS,bounds,54,2025 Spanish Grand Prix
+HAD,bounds,54,2025 Spanish Grand Prix
+HAM,bounds,55,2025 Spanish Grand Prix
+HUL,bounds,54,2025 Spanish Grand Prix
+LAW,bounds,53,2025 Spanish Grand Prix
+LEC,bounds,55,2025 Spanish Grand Prix
+NOR,bounds,55,2025 Spanish Grand Prix
+OCO,bounds,54,2025 Spanish Grand Prix
+PIA,bounds,55,2025 Spanish Grand Prix
+RUS,bounds,55,2025 Spanish Grand Prix
+SAI,bounds,54,2025 Spanish Grand Prix
+TSU,bounds,52,2025 Spanish Grand Prix
+VER,bounds,52,2025 Spanish Grand Prix
+ALB,no_sc_vsc,21,2025 Spanish Grand Prix
+ALO,no_sc_vsc,53,2025 Spanish Grand Prix
+ANT,no_sc_vsc,46,2025 Spanish Grand Prix
+BEA,no_sc_vsc,52,2025 Spanish Grand Prix
+BOR,no_sc_vsc,54,2025 Spanish Grand Prix
+COL,no_sc_vsc,52,2025 Spanish Grand Prix
+GAS,no_sc_vsc,54,2025 Spanish Grand Prix
+HAD,no_sc_vsc,54,2025 Spanish Grand Prix
+HAM,no_sc_vsc,55,2025 Spanish Grand Prix
+HUL,no_sc_vsc,54,2025 Spanish Grand Prix
+LAW,no_sc_vsc,53,2025 Spanish Grand Prix
+LEC,no_sc_vsc,55,2025 Spanish Grand Prix
+NOR,no_sc_vsc,55,2025 Spanish Grand Prix
+OCO,no_sc_vsc,54,2025 Spanish Grand Prix
+PIA,no_sc_vsc,55,2025 Spanish Grand Prix
+RUS,no_sc_vsc,55,2025 Spanish Grand Prix
+SAI,no_sc_vsc,54,2025 Spanish Grand Prix
+TSU,no_sc_vsc,52,2025 Spanish Grand Prix
+VER,no_sc_vsc,52,2025 Spanish Grand Prix
+ALB,trimmed,19,2025 Spanish Grand Prix
+ALO,trimmed,47,2025 Spanish Grand Prix
+ANT,trimmed,40,2025 Spanish Grand Prix
+BEA,trimmed,46,2025 Spanish Grand Prix
+BOR,trimmed,48,2025 Spanish Grand Prix
+COL,trimmed,46,2025 Spanish Grand Prix
+GAS,trimmed,48,2025 Spanish Grand Prix
+HAD,trimmed,48,2025 Spanish Grand Prix
+HAM,trimmed,49,2025 Spanish Grand Prix
+HUL,trimmed,48,2025 Spanish Grand Prix
+LAW,trimmed,47,2025 Spanish Grand Prix
+LEC,trimmed,49,2025 Spanish Grand Prix
+NOR,trimmed,49,2025 Spanish Grand Prix
+OCO,trimmed,48,2025 Spanish Grand Prix
+PIA,trimmed,49,2025 Spanish Grand Prix
+RUS,trimmed,49,2025 Spanish Grand Prix
+SAI,trimmed,48,2025 Spanish Grand Prix
+TSU,trimmed,46,2025 Spanish Grand Prix
+VER,trimmed,46,2025 Spanish Grand Prix
+ALB,raw,43,2025 Canadian Grand Prix
+ALO,raw,59,2025 Canadian Grand Prix
+ANT,raw,59,2025 Canadian Grand Prix
+BEA,raw,60,2025 Canadian Grand Prix
+BOR,raw,60,2025 Canadian Grand Prix
+COL,raw,60,2025 Canadian Grand Prix
+GAS,raw,60,2025 Canadian Grand Prix
+HAD,raw,60,2025 Canadian Grand Prix
+HAM,raw,59,2025 Canadian Grand Prix
+HUL,raw,61,2025 Canadian Grand Prix
+LAW,raw,48,2025 Canadian Grand Prix
+LEC,raw,58,2025 Canadian Grand Prix
+NOR,raw,61,2025 Canadian Grand Prix
+OCO,raw,60,2025 Canadian Grand Prix
+PIA,raw,59,2025 Canadian Grand Prix
+RUS,raw,59,2025 Canadian Grand Prix
+SAI,raw,60,2025 Canadian Grand Prix
+STR,raw,58,2025 Canadian Grand Prix
+TSU,raw,60,2025 Canadian Grand Prix
+VER,raw,59,2025 Canadian Grand Prix
+ALB,accurate_valid,43,2025 Canadian Grand Prix
+ALO,accurate_valid,59,2025 Canadian Grand Prix
+ANT,accurate_valid,58,2025 Canadian Grand Prix
+BEA,accurate_valid,57,2025 Canadian Grand Prix
+BOR,accurate_valid,60,2025 Canadian Grand Prix
+COL,accurate_valid,60,2025 Canadian Grand Prix
+GAS,accurate_valid,59,2025 Canadian Grand Prix
+HAD,accurate_valid,58,2025 Canadian Grand Prix
+HAM,accurate_valid,59,2025 Canadian Grand Prix
+HUL,accurate_valid,61,2025 Canadian Grand Prix
+LAW,accurate_valid,48,2025 Canadian Grand Prix
+LEC,accurate_valid,57,2025 Canadian Grand Prix
+NOR,accurate_valid,61,2025 Canadian Grand Prix
+OCO,accurate_valid,60,2025 Canadian Grand Prix
+PIA,accurate_valid,59,2025 Canadian Grand Prix
+RUS,accurate_valid,59,2025 Canadian Grand Prix
+SAI,accurate_valid,59,2025 Canadian Grand Prix
+STR,accurate_valid,58,2025 Canadian Grand Prix
+TSU,accurate_valid,60,2025 Canadian Grand Prix
+VER,accurate_valid,59,2025 Canadian Grand Prix
+ALB,no_pits,43,2025 Canadian Grand Prix
+ALO,no_pits,59,2025 Canadian Grand Prix
+ANT,no_pits,58,2025 Canadian Grand Prix
+BEA,no_pits,57,2025 Canadian Grand Prix
+BOR,no_pits,60,2025 Canadian Grand Prix
+COL,no_pits,60,2025 Canadian Grand Prix
+GAS,no_pits,59,2025 Canadian Grand Prix
+HAD,no_pits,58,2025 Canadian Grand Prix
+HAM,no_pits,59,2025 Canadian Grand Prix
+HUL,no_pits,61,2025 Canadian Grand Prix
+LAW,no_pits,48,2025 Canadian Grand Prix
+LEC,no_pits,57,2025 Canadian Grand Prix
+NOR,no_pits,61,2025 Canadian Grand Prix
+OCO,no_pits,60,2025 Canadian Grand Prix
+PIA,no_pits,59,2025 Canadian Grand Prix
+RUS,no_pits,59,2025 Canadian Grand Prix
+SAI,no_pits,59,2025 Canadian Grand Prix
+STR,no_pits,58,2025 Canadian Grand Prix
+TSU,no_pits,60,2025 Canadian Grand Prix
+VER,no_pits,59,2025 Canadian Grand Prix
+ALB,bounds,43,2025 Canadian Grand Prix
+ALO,bounds,59,2025 Canadian Grand Prix
+ANT,bounds,58,2025 Canadian Grand Prix
+BEA,bounds,57,2025 Canadian Grand Prix
+BOR,bounds,60,2025 Canadian Grand Prix
+COL,bounds,60,2025 Canadian Grand Prix
+GAS,bounds,59,2025 Canadian Grand Prix
+HAD,bounds,58,2025 Canadian Grand Prix
+HAM,bounds,59,2025 Canadian Grand Prix
+HUL,bounds,61,2025 Canadian Grand Prix
+LAW,bounds,48,2025 Canadian Grand Prix
+LEC,bounds,57,2025 Canadian Grand Prix
+NOR,bounds,61,2025 Canadian Grand Prix
+OCO,bounds,60,2025 Canadian Grand Prix
+PIA,bounds,59,2025 Canadian Grand Prix
+RUS,bounds,59,2025 Canadian Grand Prix
+SAI,bounds,59,2025 Canadian Grand Prix
+STR,bounds,58,2025 Canadian Grand Prix
+TSU,bounds,60,2025 Canadian Grand Prix
+VER,bounds,59,2025 Canadian Grand Prix
+ALB,no_sc_vsc,43,2025 Canadian Grand Prix
+ALO,no_sc_vsc,59,2025 Canadian Grand Prix
+ANT,no_sc_vsc,58,2025 Canadian Grand Prix
+BEA,no_sc_vsc,57,2025 Canadian Grand Prix
+BOR,no_sc_vsc,60,2025 Canadian Grand Prix
+COL,no_sc_vsc,60,2025 Canadian Grand Prix
+GAS,no_sc_vsc,59,2025 Canadian Grand Prix
+HAD,no_sc_vsc,58,2025 Canadian Grand Prix
+HAM,no_sc_vsc,59,2025 Canadian Grand Prix
+HUL,no_sc_vsc,61,2025 Canadian Grand Prix
+LAW,no_sc_vsc,48,2025 Canadian Grand Prix
+LEC,no_sc_vsc,57,2025 Canadian Grand Prix
+NOR,no_sc_vsc,61,2025 Canadian Grand Prix
+OCO,no_sc_vsc,60,2025 Canadian Grand Prix
+PIA,no_sc_vsc,59,2025 Canadian Grand Prix
+RUS,no_sc_vsc,59,2025 Canadian Grand Prix
+SAI,no_sc_vsc,59,2025 Canadian Grand Prix
+STR,no_sc_vsc,58,2025 Canadian Grand Prix
+TSU,no_sc_vsc,60,2025 Canadian Grand Prix
+VER,no_sc_vsc,59,2025 Canadian Grand Prix
+ALB,trimmed,37,2025 Canadian Grand Prix
+ALO,trimmed,53,2025 Canadian Grand Prix
+ANT,trimmed,52,2025 Canadian Grand Prix
+BEA,trimmed,51,2025 Canadian Grand Prix
+BOR,trimmed,54,2025 Canadian Grand Prix
+COL,trimmed,54,2025 Canadian Grand Prix
+GAS,trimmed,53,2025 Canadian Grand Prix
+HAD,trimmed,52,2025 Canadian Grand Prix
+HAM,trimmed,53,2025 Canadian Grand Prix
+HUL,trimmed,55,2025 Canadian Grand Prix
+LAW,trimmed,42,2025 Canadian Grand Prix
+LEC,trimmed,51,2025 Canadian Grand Prix
+NOR,trimmed,55,2025 Canadian Grand Prix
+OCO,trimmed,54,2025 Canadian Grand Prix
+PIA,trimmed,53,2025 Canadian Grand Prix
+RUS,trimmed,53,2025 Canadian Grand Prix
+SAI,trimmed,53,2025 Canadian Grand Prix
+STR,trimmed,52,2025 Canadian Grand Prix
+TSU,trimmed,54,2025 Canadian Grand Prix
+VER,trimmed,53,2025 Canadian Grand Prix
+ALB,raw,9,2025 Austrian Grand Prix
+ALO,raw,63,2025 Austrian Grand Prix
+BEA,raw,61,2025 Austrian Grand Prix
+BOR,raw,61,2025 Austrian Grand Prix
+COL,raw,61,2025 Austrian Grand Prix
+GAS,raw,61,2025 Austrian Grand Prix
+HAD,raw,63,2025 Austrian Grand Prix
+HAM,raw,62,2025 Austrian Grand Prix
+HUL,raw,61,2025 Austrian Grand Prix
+LAW,raw,64,2025 Austrian Grand Prix
+LEC,raw,62,2025 Austrian Grand Prix
+NOR,raw,62,2025 Austrian Grand Prix
+OCO,raw,61,2025 Austrian Grand Prix
+PIA,raw,62,2025 Austrian Grand Prix
+RUS,raw,62,2025 Austrian Grand Prix
+STR,raw,61,2025 Austrian Grand Prix
+TSU,raw,59,2025 Austrian Grand Prix
+ALB,accurate_valid,9,2025 Austrian Grand Prix
+ALO,accurate_valid,62,2025 Austrian Grand Prix
+BEA,accurate_valid,59,2025 Austrian Grand Prix
+BOR,accurate_valid,61,2025 Austrian Grand Prix
+COL,accurate_valid,60,2025 Austrian Grand Prix
+GAS,accurate_valid,61,2025 Austrian Grand Prix
+HAD,accurate_valid,63,2025 Austrian Grand Prix
+HAM,accurate_valid,61,2025 Austrian Grand Prix
+HUL,accurate_valid,61,2025 Austrian Grand Prix
+LAW,accurate_valid,64,2025 Austrian Grand Prix
+LEC,accurate_valid,61,2025 Austrian Grand Prix
+NOR,accurate_valid,61,2025 Austrian Grand Prix
+OCO,accurate_valid,60,2025 Austrian Grand Prix
+PIA,accurate_valid,60,2025 Austrian Grand Prix
+RUS,accurate_valid,62,2025 Austrian Grand Prix
+STR,accurate_valid,60,2025 Austrian Grand Prix
+TSU,accurate_valid,59,2025 Austrian Grand Prix
+ALB,no_pits,9,2025 Austrian Grand Prix
+ALO,no_pits,62,2025 Austrian Grand Prix
+BEA,no_pits,59,2025 Austrian Grand Prix
+BOR,no_pits,61,2025 Austrian Grand Prix
+COL,no_pits,60,2025 Austrian Grand Prix
+GAS,no_pits,61,2025 Austrian Grand Prix
+HAD,no_pits,63,2025 Austrian Grand Prix
+HAM,no_pits,61,2025 Austrian Grand Prix
+HUL,no_pits,61,2025 Austrian Grand Prix
+LAW,no_pits,64,2025 Austrian Grand Prix
+LEC,no_pits,61,2025 Austrian Grand Prix
+NOR,no_pits,61,2025 Austrian Grand Prix
+OCO,no_pits,60,2025 Austrian Grand Prix
+PIA,no_pits,60,2025 Austrian Grand Prix
+RUS,no_pits,62,2025 Austrian Grand Prix
+STR,no_pits,60,2025 Austrian Grand Prix
+TSU,no_pits,59,2025 Austrian Grand Prix
+ALB,bounds,9,2025 Austrian Grand Prix
+ALO,bounds,62,2025 Austrian Grand Prix
+BEA,bounds,59,2025 Austrian Grand Prix
+BOR,bounds,61,2025 Austrian Grand Prix
+COL,bounds,60,2025 Austrian Grand Prix
+GAS,bounds,61,2025 Austrian Grand Prix
+HAD,bounds,63,2025 Austrian Grand Prix
+HAM,bounds,61,2025 Austrian Grand Prix
+HUL,bounds,61,2025 Austrian Grand Prix
+LAW,bounds,64,2025 Austrian Grand Prix
+LEC,bounds,61,2025 Austrian Grand Prix
+NOR,bounds,61,2025 Austrian Grand Prix
+OCO,bounds,60,2025 Austrian Grand Prix
+PIA,bounds,60,2025 Austrian Grand Prix
+RUS,bounds,62,2025 Austrian Grand Prix
+STR,bounds,60,2025 Austrian Grand Prix
+TSU,bounds,59,2025 Austrian Grand Prix
+ALB,no_sc_vsc,9,2025 Austrian Grand Prix
+ALO,no_sc_vsc,62,2025 Austrian Grand Prix
+BEA,no_sc_vsc,59,2025 Austrian Grand Prix
+BOR,no_sc_vsc,61,2025 Austrian Grand Prix
+COL,no_sc_vsc,60,2025 Austrian Grand Prix
+GAS,no_sc_vsc,61,2025 Austrian Grand Prix
+HAD,no_sc_vsc,63,2025 Austrian Grand Prix
+HAM,no_sc_vsc,61,2025 Austrian Grand Prix
+HUL,no_sc_vsc,61,2025 Austrian Grand Prix
+LAW,no_sc_vsc,64,2025 Austrian Grand Prix
+LEC,no_sc_vsc,61,2025 Austrian Grand Prix
+NOR,no_sc_vsc,61,2025 Austrian Grand Prix
+OCO,no_sc_vsc,60,2025 Austrian Grand Prix
+PIA,no_sc_vsc,60,2025 Austrian Grand Prix
+RUS,no_sc_vsc,62,2025 Austrian Grand Prix
+STR,no_sc_vsc,60,2025 Austrian Grand Prix
+TSU,no_sc_vsc,59,2025 Austrian Grand Prix
+ALB,trimmed,7,2025 Austrian Grand Prix
+ALO,trimmed,54,2025 Austrian Grand Prix
+BEA,trimmed,53,2025 Austrian Grand Prix
+BOR,trimmed,55,2025 Austrian Grand Prix
+COL,trimmed,54,2025 Austrian Grand Prix
+GAS,trimmed,55,2025 Austrian Grand Prix
+HAD,trimmed,55,2025 Austrian Grand Prix
+HAM,trimmed,55,2025 Austrian Grand Prix
+HUL,trimmed,55,2025 Austrian Grand Prix
+LAW,trimmed,56,2025 Austrian Grand Prix
+LEC,trimmed,55,2025 Austrian Grand Prix
+NOR,trimmed,55,2025 Austrian Grand Prix
+OCO,trimmed,54,2025 Austrian Grand Prix
+PIA,trimmed,54,2025 Austrian Grand Prix
+RUS,trimmed,54,2025 Austrian Grand Prix
+STR,trimmed,54,2025 Austrian Grand Prix
+TSU,trimmed,53,2025 Austrian Grand Prix
+ALB,raw,31,2025 British Grand Prix
+ALO,raw,28,2025 British Grand Prix
+ANT,raw,3,2025 British Grand Prix
+BEA,raw,29,2025 British Grand Prix
+GAS,raw,27,2025 British Grand Prix
+HAD,raw,3,2025 British Grand Prix
+HAM,raw,28,2025 British Grand Prix
+HUL,raw,29,2025 British Grand Prix
+LEC,raw,30,2025 British Grand Prix
+NOR,raw,29,2025 British Grand Prix
+OCO,raw,32,2025 British Grand Prix
+PIA,raw,31,2025 British Grand Prix
+RUS,raw,29,2025 British Grand Prix
+SAI,raw,29,2025 British Grand Prix
+STR,raw,27,2025 British Grand Prix
+TSU,raw,28,2025 British Grand Prix
+VER,raw,28,2025 British Grand Prix
+ALB,accurate_valid,31,2025 British Grand Prix
+ALO,accurate_valid,28,2025 British Grand Prix
+ANT,accurate_valid,3,2025 British Grand Prix
+BEA,accurate_valid,28,2025 British Grand Prix
+GAS,accurate_valid,27,2025 British Grand Prix
+HAD,accurate_valid,3,2025 British Grand Prix
+HAM,accurate_valid,27,2025 British Grand Prix
+HUL,accurate_valid,29,2025 British Grand Prix
+LEC,accurate_valid,29,2025 British Grand Prix
+NOR,accurate_valid,29,2025 British Grand Prix
+OCO,accurate_valid,32,2025 British Grand Prix
+PIA,accurate_valid,29,2025 British Grand Prix
+RUS,accurate_valid,29,2025 British Grand Prix
+SAI,accurate_valid,28,2025 British Grand Prix
+STR,accurate_valid,27,2025 British Grand Prix
+TSU,accurate_valid,28,2025 British Grand Prix
+VER,accurate_valid,28,2025 British Grand Prix
+ALB,no_pits,31,2025 British Grand Prix
+ALO,no_pits,28,2025 British Grand Prix
+ANT,no_pits,3,2025 British Grand Prix
+BEA,no_pits,28,2025 British Grand Prix
+GAS,no_pits,27,2025 British Grand Prix
+HAD,no_pits,3,2025 British Grand Prix
+HAM,no_pits,27,2025 British Grand Prix
+HUL,no_pits,29,2025 British Grand Prix
+LEC,no_pits,29,2025 British Grand Prix
+NOR,no_pits,29,2025 British Grand Prix
+OCO,no_pits,32,2025 British Grand Prix
+PIA,no_pits,29,2025 British Grand Prix
+RUS,no_pits,29,2025 British Grand Prix
+SAI,no_pits,28,2025 British Grand Prix
+STR,no_pits,27,2025 British Grand Prix
+TSU,no_pits,28,2025 British Grand Prix
+VER,no_pits,28,2025 British Grand Prix
+ALB,bounds,31,2025 British Grand Prix
+ALO,bounds,28,2025 British Grand Prix
+ANT,bounds,3,2025 British Grand Prix
+BEA,bounds,28,2025 British Grand Prix
+GAS,bounds,27,2025 British Grand Prix
+HAD,bounds,3,2025 British Grand Prix
+HAM,bounds,27,2025 British Grand Prix
+HUL,bounds,29,2025 British Grand Prix
+LEC,bounds,29,2025 British Grand Prix
+NOR,bounds,29,2025 British Grand Prix
+OCO,bounds,32,2025 British Grand Prix
+PIA,bounds,29,2025 British Grand Prix
+RUS,bounds,29,2025 British Grand Prix
+SAI,bounds,28,2025 British Grand Prix
+STR,bounds,27,2025 British Grand Prix
+TSU,bounds,28,2025 British Grand Prix
+VER,bounds,28,2025 British Grand Prix
+ALB,no_sc_vsc,31,2025 British Grand Prix
+ALO,no_sc_vsc,28,2025 British Grand Prix
+ANT,no_sc_vsc,3,2025 British Grand Prix
+BEA,no_sc_vsc,28,2025 British Grand Prix
+GAS,no_sc_vsc,27,2025 British Grand Prix
+HAD,no_sc_vsc,3,2025 British Grand Prix
+HAM,no_sc_vsc,27,2025 British Grand Prix
+HUL,no_sc_vsc,29,2025 British Grand Prix
+LEC,no_sc_vsc,29,2025 British Grand Prix
+NOR,no_sc_vsc,29,2025 British Grand Prix
+OCO,no_sc_vsc,32,2025 British Grand Prix
+PIA,no_sc_vsc,29,2025 British Grand Prix
+RUS,no_sc_vsc,29,2025 British Grand Prix
+SAI,no_sc_vsc,28,2025 British Grand Prix
+STR,no_sc_vsc,27,2025 British Grand Prix
+TSU,no_sc_vsc,28,2025 British Grand Prix
+VER,no_sc_vsc,28,2025 British Grand Prix
+ALB,trimmed,27,2025 British Grand Prix
+ALO,trimmed,24,2025 British Grand Prix
+ANT,trimmed,3,2025 British Grand Prix
+BEA,trimmed,24,2025 British Grand Prix
+GAS,trimmed,23,2025 British Grand Prix
+HAD,trimmed,3,2025 British Grand Prix
+HAM,trimmed,23,2025 British Grand Prix
+HUL,trimmed,25,2025 British Grand Prix
+LEC,trimmed,25,2025 British Grand Prix
+NOR,trimmed,25,2025 British Grand Prix
+OCO,trimmed,28,2025 British Grand Prix
+PIA,trimmed,25,2025 British Grand Prix
+RUS,trimmed,25,2025 British Grand Prix
+SAI,trimmed,24,2025 British Grand Prix
+STR,trimmed,23,2025 British Grand Prix
+TSU,trimmed,24,2025 British Grand Prix
+VER,trimmed,24,2025 British Grand Prix
+ALB,raw,64,2025 Hungarian Grand Prix
+ALO,raw,67,2025 Hungarian Grand Prix
+ANT,raw,66,2025 Hungarian Grand Prix
+BEA,raw,44,2025 Hungarian Grand Prix
+BOR,raw,67,2025 Hungarian Grand Prix
+COL,raw,64,2025 Hungarian Grand Prix
+GAS,raw,66,2025 Hungarian Grand Prix
+HAD,raw,66,2025 Hungarian Grand Prix
+HAM,raw,66,2025 Hungarian Grand Prix
+HUL,raw,64,2025 Hungarian Grand Prix
+LAW,raw,67,2025 Hungarian Grand Prix
+LEC,raw,65,2025 Hungarian Grand Prix
+NOR,raw,67,2025 Hungarian Grand Prix
+OCO,raw,66,2025 Hungarian Grand Prix
+PIA,raw,65,2025 Hungarian Grand Prix
+RUS,raw,65,2025 Hungarian Grand Prix
+SAI,raw,64,2025 Hungarian Grand Prix
+STR,raw,67,2025 Hungarian Grand Prix
+TSU,raw,64,2025 Hungarian Grand Prix
+VER,raw,65,2025 Hungarian Grand Prix
 ALB,accurate_valid,63,2025 Hungarian Grand Prix
 ALO,accurate_valid,67,2025 Hungarian Grand Prix
 ANT,accurate_valid,65,2025 Hungarian Grand Prix
@@ -119,453 +1247,3 @@ SAI,trimmed,55,2025 Hungarian Grand Prix
 STR,trimmed,59,2025 Hungarian Grand Prix
 TSU,trimmed,56,2025 Hungarian Grand Prix
 VER,trimmed,57,2025 Hungarian Grand Prix
-ALB,raw,44,2025 Belgian Grand Prix
-ALO,raw,44,2025 Belgian Grand Prix
-ANT,raw,44,2025 Belgian Grand Prix
-BEA,raw,44,2025 Belgian Grand Prix
-BOR,raw,44,2025 Belgian Grand Prix
-COL,raw,44,2025 Belgian Grand Prix
-GAS,raw,44,2025 Belgian Grand Prix
-HAD,raw,43,2025 Belgian Grand Prix
-HAM,raw,44,2025 Belgian Grand Prix
-HUL,raw,44,2025 Belgian Grand Prix
-LAW,raw,44,2025 Belgian Grand Prix
-LEC,raw,44,2025 Belgian Grand Prix
-NOR,raw,44,2025 Belgian Grand Prix
-OCO,raw,44,2025 Belgian Grand Prix
-PIA,raw,44,2025 Belgian Grand Prix
-RUS,raw,44,2025 Belgian Grand Prix
-SAI,raw,44,2025 Belgian Grand Prix
-STR,raw,44,2025 Belgian Grand Prix
-TSU,raw,44,2025 Belgian Grand Prix
-VER,raw,44,2025 Belgian Grand Prix
-ALB,accurate_valid,37,2025 Belgian Grand Prix
-ALO,accurate_valid,35,2025 Belgian Grand Prix
-ANT,accurate_valid,35,2025 Belgian Grand Prix
-BEA,accurate_valid,38,2025 Belgian Grand Prix
-BOR,accurate_valid,37,2025 Belgian Grand Prix
-COL,accurate_valid,34,2025 Belgian Grand Prix
-GAS,accurate_valid,37,2025 Belgian Grand Prix
-HAD,accurate_valid,33,2025 Belgian Grand Prix
-HAM,accurate_valid,38,2025 Belgian Grand Prix
-HUL,accurate_valid,36,2025 Belgian Grand Prix
-LAW,accurate_valid,38,2025 Belgian Grand Prix
-LEC,accurate_valid,38,2025 Belgian Grand Prix
-NOR,accurate_valid,37,2025 Belgian Grand Prix
-OCO,accurate_valid,38,2025 Belgian Grand Prix
-PIA,accurate_valid,38,2025 Belgian Grand Prix
-RUS,accurate_valid,38,2025 Belgian Grand Prix
-SAI,accurate_valid,34,2025 Belgian Grand Prix
-STR,accurate_valid,38,2025 Belgian Grand Prix
-TSU,accurate_valid,37,2025 Belgian Grand Prix
-VER,accurate_valid,38,2025 Belgian Grand Prix
-ALB,no_pits,37,2025 Belgian Grand Prix
-ALO,no_pits,35,2025 Belgian Grand Prix
-ANT,no_pits,35,2025 Belgian Grand Prix
-BEA,no_pits,38,2025 Belgian Grand Prix
-BOR,no_pits,37,2025 Belgian Grand Prix
-COL,no_pits,34,2025 Belgian Grand Prix
-GAS,no_pits,37,2025 Belgian Grand Prix
-HAD,no_pits,33,2025 Belgian Grand Prix
-HAM,no_pits,38,2025 Belgian Grand Prix
-HUL,no_pits,36,2025 Belgian Grand Prix
-LAW,no_pits,38,2025 Belgian Grand Prix
-LEC,no_pits,38,2025 Belgian Grand Prix
-NOR,no_pits,37,2025 Belgian Grand Prix
-OCO,no_pits,38,2025 Belgian Grand Prix
-PIA,no_pits,38,2025 Belgian Grand Prix
-RUS,no_pits,38,2025 Belgian Grand Prix
-SAI,no_pits,34,2025 Belgian Grand Prix
-STR,no_pits,38,2025 Belgian Grand Prix
-TSU,no_pits,37,2025 Belgian Grand Prix
-VER,no_pits,38,2025 Belgian Grand Prix
-ALB,bounds,37,2025 Belgian Grand Prix
-ALO,bounds,35,2025 Belgian Grand Prix
-ANT,bounds,35,2025 Belgian Grand Prix
-BEA,bounds,38,2025 Belgian Grand Prix
-BOR,bounds,37,2025 Belgian Grand Prix
-COL,bounds,34,2025 Belgian Grand Prix
-GAS,bounds,37,2025 Belgian Grand Prix
-HAD,bounds,33,2025 Belgian Grand Prix
-HAM,bounds,38,2025 Belgian Grand Prix
-HUL,bounds,36,2025 Belgian Grand Prix
-LAW,bounds,38,2025 Belgian Grand Prix
-LEC,bounds,38,2025 Belgian Grand Prix
-NOR,bounds,37,2025 Belgian Grand Prix
-OCO,bounds,38,2025 Belgian Grand Prix
-PIA,bounds,38,2025 Belgian Grand Prix
-RUS,bounds,38,2025 Belgian Grand Prix
-SAI,bounds,34,2025 Belgian Grand Prix
-STR,bounds,38,2025 Belgian Grand Prix
-TSU,bounds,37,2025 Belgian Grand Prix
-VER,bounds,38,2025 Belgian Grand Prix
-ALB,no_sc_vsc,37,2025 Belgian Grand Prix
-ALO,no_sc_vsc,35,2025 Belgian Grand Prix
-ANT,no_sc_vsc,35,2025 Belgian Grand Prix
-BEA,no_sc_vsc,38,2025 Belgian Grand Prix
-BOR,no_sc_vsc,37,2025 Belgian Grand Prix
-COL,no_sc_vsc,34,2025 Belgian Grand Prix
-GAS,no_sc_vsc,37,2025 Belgian Grand Prix
-HAD,no_sc_vsc,33,2025 Belgian Grand Prix
-HAM,no_sc_vsc,38,2025 Belgian Grand Prix
-HUL,no_sc_vsc,36,2025 Belgian Grand Prix
-LAW,no_sc_vsc,38,2025 Belgian Grand Prix
-LEC,no_sc_vsc,38,2025 Belgian Grand Prix
-NOR,no_sc_vsc,37,2025 Belgian Grand Prix
-OCO,no_sc_vsc,38,2025 Belgian Grand Prix
-PIA,no_sc_vsc,38,2025 Belgian Grand Prix
-RUS,no_sc_vsc,38,2025 Belgian Grand Prix
-SAI,no_sc_vsc,34,2025 Belgian Grand Prix
-STR,no_sc_vsc,38,2025 Belgian Grand Prix
-TSU,no_sc_vsc,37,2025 Belgian Grand Prix
-VER,no_sc_vsc,38,2025 Belgian Grand Prix
-ALB,trimmed,33,2025 Belgian Grand Prix
-ALO,trimmed,31,2025 Belgian Grand Prix
-ANT,trimmed,31,2025 Belgian Grand Prix
-BEA,trimmed,34,2025 Belgian Grand Prix
-BOR,trimmed,33,2025 Belgian Grand Prix
-COL,trimmed,30,2025 Belgian Grand Prix
-GAS,trimmed,33,2025 Belgian Grand Prix
-HAD,trimmed,29,2025 Belgian Grand Prix
-HAM,trimmed,34,2025 Belgian Grand Prix
-HUL,trimmed,32,2025 Belgian Grand Prix
-LAW,trimmed,34,2025 Belgian Grand Prix
-LEC,trimmed,34,2025 Belgian Grand Prix
-NOR,trimmed,33,2025 Belgian Grand Prix
-OCO,trimmed,34,2025 Belgian Grand Prix
-PIA,trimmed,34,2025 Belgian Grand Prix
-RUS,trimmed,34,2025 Belgian Grand Prix
-SAI,trimmed,30,2025 Belgian Grand Prix
-STR,trimmed,34,2025 Belgian Grand Prix
-TSU,trimmed,33,2025 Belgian Grand Prix
-VER,trimmed,34,2025 Belgian Grand Prix
-ALB,raw,52,2025 British Grand Prix
-ALO,raw,52,2025 British Grand Prix
-ANT,raw,23,2025 British Grand Prix
-BEA,raw,52,2025 British Grand Prix
-BOR,raw,4,2025 British Grand Prix
-COL,raw,1,2025 British Grand Prix
-GAS,raw,52,2025 British Grand Prix
-HAD,raw,18,2025 British Grand Prix
-HAM,raw,52,2025 British Grand Prix
-HUL,raw,52,2025 British Grand Prix
-LAW,raw,1,2025 British Grand Prix
-LEC,raw,52,2025 British Grand Prix
-NOR,raw,52,2025 British Grand Prix
-OCO,raw,52,2025 British Grand Prix
-PIA,raw,52,2025 British Grand Prix
-RUS,raw,52,2025 British Grand Prix
-SAI,raw,52,2025 British Grand Prix
-STR,raw,52,2025 British Grand Prix
-TSU,raw,51,2025 British Grand Prix
-VER,raw,52,2025 British Grand Prix
-ALB,accurate_valid,33,2025 British Grand Prix
-ALO,accurate_valid,32,2025 British Grand Prix
-ANT,accurate_valid,4,2025 British Grand Prix
-BEA,accurate_valid,32,2025 British Grand Prix
-GAS,accurate_valid,32,2025 British Grand Prix
-HAD,accurate_valid,4,2025 British Grand Prix
-HAM,accurate_valid,31,2025 British Grand Prix
-HUL,accurate_valid,32,2025 British Grand Prix
-LEC,accurate_valid,32,2025 British Grand Prix
-NOR,accurate_valid,33,2025 British Grand Prix
-OCO,accurate_valid,34,2025 British Grand Prix
-PIA,accurate_valid,31,2025 British Grand Prix
-RUS,accurate_valid,33,2025 British Grand Prix
-SAI,accurate_valid,31,2025 British Grand Prix
-STR,accurate_valid,32,2025 British Grand Prix
-TSU,accurate_valid,31,2025 British Grand Prix
-VER,accurate_valid,32,2025 British Grand Prix
-ALB,no_pits,33,2025 British Grand Prix
-ALO,no_pits,32,2025 British Grand Prix
-ANT,no_pits,4,2025 British Grand Prix
-BEA,no_pits,32,2025 British Grand Prix
-GAS,no_pits,32,2025 British Grand Prix
-HAD,no_pits,4,2025 British Grand Prix
-HAM,no_pits,31,2025 British Grand Prix
-HUL,no_pits,32,2025 British Grand Prix
-LEC,no_pits,32,2025 British Grand Prix
-NOR,no_pits,33,2025 British Grand Prix
-OCO,no_pits,34,2025 British Grand Prix
-PIA,no_pits,31,2025 British Grand Prix
-RUS,no_pits,33,2025 British Grand Prix
-SAI,no_pits,31,2025 British Grand Prix
-STR,no_pits,32,2025 British Grand Prix
-TSU,no_pits,31,2025 British Grand Prix
-VER,no_pits,32,2025 British Grand Prix
-ALB,bounds,33,2025 British Grand Prix
-ALO,bounds,32,2025 British Grand Prix
-ANT,bounds,4,2025 British Grand Prix
-BEA,bounds,32,2025 British Grand Prix
-GAS,bounds,32,2025 British Grand Prix
-HAD,bounds,4,2025 British Grand Prix
-HAM,bounds,31,2025 British Grand Prix
-HUL,bounds,32,2025 British Grand Prix
-LEC,bounds,32,2025 British Grand Prix
-NOR,bounds,33,2025 British Grand Prix
-OCO,bounds,34,2025 British Grand Prix
-PIA,bounds,31,2025 British Grand Prix
-RUS,bounds,33,2025 British Grand Prix
-SAI,bounds,31,2025 British Grand Prix
-STR,bounds,32,2025 British Grand Prix
-TSU,bounds,31,2025 British Grand Prix
-VER,bounds,32,2025 British Grand Prix
-ALB,no_sc_vsc,31,2025 British Grand Prix
-ALO,no_sc_vsc,28,2025 British Grand Prix
-ANT,no_sc_vsc,3,2025 British Grand Prix
-BEA,no_sc_vsc,28,2025 British Grand Prix
-GAS,no_sc_vsc,27,2025 British Grand Prix
-HAD,no_sc_vsc,3,2025 British Grand Prix
-HAM,no_sc_vsc,27,2025 British Grand Prix
-HUL,no_sc_vsc,29,2025 British Grand Prix
-LEC,no_sc_vsc,29,2025 British Grand Prix
-NOR,no_sc_vsc,29,2025 British Grand Prix
-OCO,no_sc_vsc,32,2025 British Grand Prix
-PIA,no_sc_vsc,29,2025 British Grand Prix
-RUS,no_sc_vsc,29,2025 British Grand Prix
-SAI,no_sc_vsc,28,2025 British Grand Prix
-STR,no_sc_vsc,27,2025 British Grand Prix
-TSU,no_sc_vsc,28,2025 British Grand Prix
-VER,no_sc_vsc,28,2025 British Grand Prix
-ALB,trimmed,27,2025 British Grand Prix
-ALO,trimmed,24,2025 British Grand Prix
-ANT,trimmed,3,2025 British Grand Prix
-BEA,trimmed,24,2025 British Grand Prix
-GAS,trimmed,23,2025 British Grand Prix
-HAD,trimmed,3,2025 British Grand Prix
-HAM,trimmed,23,2025 British Grand Prix
-HUL,trimmed,25,2025 British Grand Prix
-LEC,trimmed,25,2025 British Grand Prix
-NOR,trimmed,25,2025 British Grand Prix
-OCO,trimmed,28,2025 British Grand Prix
-PIA,trimmed,25,2025 British Grand Prix
-RUS,trimmed,25,2025 British Grand Prix
-SAI,trimmed,24,2025 British Grand Prix
-STR,trimmed,23,2025 British Grand Prix
-TSU,trimmed,24,2025 British Grand Prix
-VER,trimmed,24,2025 British Grand Prix
-ALB,raw,15,2025 Austrian Grand Prix
-ALO,raw,69,2025 Austrian Grand Prix
-ANT,raw,1,2025 Austrian Grand Prix
-BEA,raw,69,2025 Austrian Grand Prix
-BOR,raw,69,2025 Austrian Grand Prix
-COL,raw,69,2025 Austrian Grand Prix
-GAS,raw,69,2025 Austrian Grand Prix
-HAD,raw,69,2025 Austrian Grand Prix
-HAM,raw,70,2025 Austrian Grand Prix
-HUL,raw,69,2025 Austrian Grand Prix
-LAW,raw,70,2025 Austrian Grand Prix
-LEC,raw,70,2025 Austrian Grand Prix
-NOR,raw,70,2025 Austrian Grand Prix
-OCO,raw,69,2025 Austrian Grand Prix
-PIA,raw,70,2025 Austrian Grand Prix
-RUS,raw,70,2025 Austrian Grand Prix
-SAI,raw,1,2025 Austrian Grand Prix
-STR,raw,69,2025 Austrian Grand Prix
-TSU,raw,68,2025 Austrian Grand Prix
-VER,raw,1,2025 Austrian Grand Prix
-ALB,accurate_valid,9,2025 Austrian Grand Prix
-ALO,accurate_valid,63,2025 Austrian Grand Prix
-BEA,accurate_valid,60,2025 Austrian Grand Prix
-BOR,accurate_valid,62,2025 Austrian Grand Prix
-COL,accurate_valid,61,2025 Austrian Grand Prix
-GAS,accurate_valid,62,2025 Austrian Grand Prix
-HAD,accurate_valid,64,2025 Austrian Grand Prix
-HAM,accurate_valid,62,2025 Austrian Grand Prix
-HUL,accurate_valid,62,2025 Austrian Grand Prix
-LAW,accurate_valid,65,2025 Austrian Grand Prix
-LEC,accurate_valid,62,2025 Austrian Grand Prix
-NOR,accurate_valid,62,2025 Austrian Grand Prix
-OCO,accurate_valid,61,2025 Austrian Grand Prix
-PIA,accurate_valid,61,2025 Austrian Grand Prix
-RUS,accurate_valid,63,2025 Austrian Grand Prix
-STR,accurate_valid,61,2025 Austrian Grand Prix
-TSU,accurate_valid,59,2025 Austrian Grand Prix
-ALB,no_pits,9,2025 Austrian Grand Prix
-ALO,no_pits,63,2025 Austrian Grand Prix
-BEA,no_pits,60,2025 Austrian Grand Prix
-BOR,no_pits,62,2025 Austrian Grand Prix
-COL,no_pits,61,2025 Austrian Grand Prix
-GAS,no_pits,62,2025 Austrian Grand Prix
-HAD,no_pits,64,2025 Austrian Grand Prix
-HAM,no_pits,62,2025 Austrian Grand Prix
-HUL,no_pits,62,2025 Austrian Grand Prix
-LAW,no_pits,65,2025 Austrian Grand Prix
-LEC,no_pits,62,2025 Austrian Grand Prix
-NOR,no_pits,62,2025 Austrian Grand Prix
-OCO,no_pits,61,2025 Austrian Grand Prix
-PIA,no_pits,61,2025 Austrian Grand Prix
-RUS,no_pits,63,2025 Austrian Grand Prix
-STR,no_pits,61,2025 Austrian Grand Prix
-TSU,no_pits,59,2025 Austrian Grand Prix
-ALB,bounds,9,2025 Austrian Grand Prix
-ALO,bounds,63,2025 Austrian Grand Prix
-BEA,bounds,60,2025 Austrian Grand Prix
-BOR,bounds,62,2025 Austrian Grand Prix
-COL,bounds,61,2025 Austrian Grand Prix
-GAS,bounds,62,2025 Austrian Grand Prix
-HAD,bounds,64,2025 Austrian Grand Prix
-HAM,bounds,62,2025 Austrian Grand Prix
-HUL,bounds,62,2025 Austrian Grand Prix
-LAW,bounds,65,2025 Austrian Grand Prix
-LEC,bounds,62,2025 Austrian Grand Prix
-NOR,bounds,62,2025 Austrian Grand Prix
-OCO,bounds,61,2025 Austrian Grand Prix
-PIA,bounds,61,2025 Austrian Grand Prix
-RUS,bounds,63,2025 Austrian Grand Prix
-STR,bounds,61,2025 Austrian Grand Prix
-TSU,bounds,59,2025 Austrian Grand Prix
-ALB,no_sc_vsc,9,2025 Austrian Grand Prix
-ALO,no_sc_vsc,62,2025 Austrian Grand Prix
-BEA,no_sc_vsc,59,2025 Austrian Grand Prix
-BOR,no_sc_vsc,61,2025 Austrian Grand Prix
-COL,no_sc_vsc,60,2025 Austrian Grand Prix
-GAS,no_sc_vsc,61,2025 Austrian Grand Prix
-HAD,no_sc_vsc,63,2025 Austrian Grand Prix
-HAM,no_sc_vsc,61,2025 Austrian Grand Prix
-HUL,no_sc_vsc,61,2025 Austrian Grand Prix
-LAW,no_sc_vsc,64,2025 Austrian Grand Prix
-LEC,no_sc_vsc,61,2025 Austrian Grand Prix
-NOR,no_sc_vsc,61,2025 Austrian Grand Prix
-OCO,no_sc_vsc,60,2025 Austrian Grand Prix
-PIA,no_sc_vsc,60,2025 Austrian Grand Prix
-RUS,no_sc_vsc,62,2025 Austrian Grand Prix
-STR,no_sc_vsc,60,2025 Austrian Grand Prix
-TSU,no_sc_vsc,59,2025 Austrian Grand Prix
-ALB,trimmed,7,2025 Austrian Grand Prix
-ALO,trimmed,54,2025 Austrian Grand Prix
-BEA,trimmed,53,2025 Austrian Grand Prix
-BOR,trimmed,55,2025 Austrian Grand Prix
-COL,trimmed,54,2025 Austrian Grand Prix
-GAS,trimmed,55,2025 Austrian Grand Prix
-HAD,trimmed,55,2025 Austrian Grand Prix
-HAM,trimmed,55,2025 Austrian Grand Prix
-HUL,trimmed,55,2025 Austrian Grand Prix
-LAW,trimmed,56,2025 Austrian Grand Prix
-LEC,trimmed,55,2025 Austrian Grand Prix
-NOR,trimmed,55,2025 Austrian Grand Prix
-OCO,trimmed,54,2025 Austrian Grand Prix
-PIA,trimmed,54,2025 Austrian Grand Prix
-RUS,trimmed,54,2025 Austrian Grand Prix
-STR,trimmed,54,2025 Austrian Grand Prix
-TSU,trimmed,53,2025 Austrian Grand Prix
-ALB,raw,47,2025 Canadian Grand Prix
-ALO,raw,70,2025 Canadian Grand Prix
-ANT,raw,70,2025 Canadian Grand Prix
-BEA,raw,69,2025 Canadian Grand Prix
-BOR,raw,69,2025 Canadian Grand Prix
-COL,raw,69,2025 Canadian Grand Prix
-GAS,raw,69,2025 Canadian Grand Prix
-HAD,raw,69,2025 Canadian Grand Prix
-HAM,raw,70,2025 Canadian Grand Prix
-HUL,raw,70,2025 Canadian Grand Prix
-LAW,raw,54,2025 Canadian Grand Prix
-LEC,raw,70,2025 Canadian Grand Prix
-NOR,raw,67,2025 Canadian Grand Prix
-OCO,raw,69,2025 Canadian Grand Prix
-PIA,raw,70,2025 Canadian Grand Prix
-RUS,raw,70,2025 Canadian Grand Prix
-SAI,raw,69,2025 Canadian Grand Prix
-STR,raw,69,2025 Canadian Grand Prix
-TSU,raw,69,2025 Canadian Grand Prix
-VER,raw,70,2025 Canadian Grand Prix
-ALB,accurate_valid,43,2025 Canadian Grand Prix
-ALO,accurate_valid,60,2025 Canadian Grand Prix
-ANT,accurate_valid,60,2025 Canadian Grand Prix
-BEA,accurate_valid,59,2025 Canadian Grand Prix
-BOR,accurate_valid,62,2025 Canadian Grand Prix
-COL,accurate_valid,62,2025 Canadian Grand Prix
-GAS,accurate_valid,61,2025 Canadian Grand Prix
-HAD,accurate_valid,60,2025 Canadian Grand Prix
-HAM,accurate_valid,60,2025 Canadian Grand Prix
-HUL,accurate_valid,62,2025 Canadian Grand Prix
-LAW,accurate_valid,50,2025 Canadian Grand Prix
-LEC,accurate_valid,60,2025 Canadian Grand Prix
-NOR,accurate_valid,61,2025 Canadian Grand Prix
-OCO,accurate_valid,62,2025 Canadian Grand Prix
-PIA,accurate_valid,61,2025 Canadian Grand Prix
-RUS,accurate_valid,61,2025 Canadian Grand Prix
-SAI,accurate_valid,61,2025 Canadian Grand Prix
-STR,accurate_valid,60,2025 Canadian Grand Prix
-TSU,accurate_valid,62,2025 Canadian Grand Prix
-VER,accurate_valid,61,2025 Canadian Grand Prix
-ALB,no_pits,43,2025 Canadian Grand Prix
-ALO,no_pits,60,2025 Canadian Grand Prix
-ANT,no_pits,60,2025 Canadian Grand Prix
-BEA,no_pits,59,2025 Canadian Grand Prix
-BOR,no_pits,62,2025 Canadian Grand Prix
-COL,no_pits,62,2025 Canadian Grand Prix
-GAS,no_pits,61,2025 Canadian Grand Prix
-HAD,no_pits,60,2025 Canadian Grand Prix
-HAM,no_pits,60,2025 Canadian Grand Prix
-HUL,no_pits,62,2025 Canadian Grand Prix
-LAW,no_pits,50,2025 Canadian Grand Prix
-LEC,no_pits,60,2025 Canadian Grand Prix
-NOR,no_pits,61,2025 Canadian Grand Prix
-OCO,no_pits,62,2025 Canadian Grand Prix
-PIA,no_pits,61,2025 Canadian Grand Prix
-RUS,no_pits,61,2025 Canadian Grand Prix
-SAI,no_pits,61,2025 Canadian Grand Prix
-STR,no_pits,60,2025 Canadian Grand Prix
-TSU,no_pits,62,2025 Canadian Grand Prix
-VER,no_pits,61,2025 Canadian Grand Prix
-ALB,bounds,43,2025 Canadian Grand Prix
-ALO,bounds,60,2025 Canadian Grand Prix
-ANT,bounds,60,2025 Canadian Grand Prix
-BEA,bounds,59,2025 Canadian Grand Prix
-BOR,bounds,62,2025 Canadian Grand Prix
-COL,bounds,62,2025 Canadian Grand Prix
-GAS,bounds,61,2025 Canadian Grand Prix
-HAD,bounds,60,2025 Canadian Grand Prix
-HAM,bounds,60,2025 Canadian Grand Prix
-HUL,bounds,62,2025 Canadian Grand Prix
-LAW,bounds,50,2025 Canadian Grand Prix
-LEC,bounds,60,2025 Canadian Grand Prix
-NOR,bounds,61,2025 Canadian Grand Prix
-OCO,bounds,62,2025 Canadian Grand Prix
-PIA,bounds,61,2025 Canadian Grand Prix
-RUS,bounds,61,2025 Canadian Grand Prix
-SAI,bounds,61,2025 Canadian Grand Prix
-STR,bounds,60,2025 Canadian Grand Prix
-TSU,bounds,62,2025 Canadian Grand Prix
-VER,bounds,61,2025 Canadian Grand Prix
-ALB,no_sc_vsc,43,2025 Canadian Grand Prix
-ALO,no_sc_vsc,59,2025 Canadian Grand Prix
-ANT,no_sc_vsc,58,2025 Canadian Grand Prix
-BEA,no_sc_vsc,57,2025 Canadian Grand Prix
-BOR,no_sc_vsc,60,2025 Canadian Grand Prix
-COL,no_sc_vsc,60,2025 Canadian Grand Prix
-GAS,no_sc_vsc,59,2025 Canadian Grand Prix
-HAD,no_sc_vsc,58,2025 Canadian Grand Prix
-HAM,no_sc_vsc,59,2025 Canadian Grand Prix
-HUL,no_sc_vsc,61,2025 Canadian Grand Prix
-LAW,no_sc_vsc,48,2025 Canadian Grand Prix
-LEC,no_sc_vsc,57,2025 Canadian Grand Prix
-NOR,no_sc_vsc,61,2025 Canadian Grand Prix
-OCO,no_sc_vsc,60,2025 Canadian Grand Prix
-PIA,no_sc_vsc,59,2025 Canadian Grand Prix
-RUS,no_sc_vsc,59,2025 Canadian Grand Prix
-SAI,no_sc_vsc,59,2025 Canadian Grand Prix
-STR,no_sc_vsc,58,2025 Canadian Grand Prix
-TSU,no_sc_vsc,60,2025 Canadian Grand Prix
-VER,no_sc_vsc,59,2025 Canadian Grand Prix
-ALB,trimmed,37,2025 Canadian Grand Prix
-ALO,trimmed,53,2025 Canadian Grand Prix
-ANT,trimmed,52,2025 Canadian Grand Prix
-BEA,trimmed,51,2025 Canadian Grand Prix
-BOR,trimmed,54,2025 Canadian Grand Prix
-COL,trimmed,54,2025 Canadian Grand Prix
-GAS,trimmed,53,2025 Canadian Grand Prix
-HAD,trimmed,52,2025 Canadian Grand Prix
-HAM,trimmed,53,2025 Canadian Grand Prix
-HUL,trimmed,55,2025 Canadian Grand Prix
-LAW,trimmed,42,2025 Canadian Grand Prix
-LEC,trimmed,51,2025 Canadian Grand Prix
-NOR,trimmed,55,2025 Canadian Grand Prix
-OCO,trimmed,54,2025 Canadian Grand Prix
-PIA,trimmed,53,2025 Canadian Grand Prix
-RUS,trimmed,53,2025 Canadian Grand Prix
-SAI,trimmed,53,2025 Canadian Grand Prix
-STR,trimmed,52,2025 Canadian Grand Prix
-TSU,trimmed,54,2025 Canadian Grand Prix
-VER,trimmed,53,2025 Canadian Grand Prix

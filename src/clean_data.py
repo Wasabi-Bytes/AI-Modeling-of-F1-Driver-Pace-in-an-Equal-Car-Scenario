@@ -208,6 +208,46 @@ def clean_quali_laps(
     summary = _combine_summaries([s0, sA, sB, sC, sD])
     return dD.reset_index(drop=True), summary.reset_index(drop=True)
 
+# --- Effective sample size (ESS) across events ---
+def compute_driver_n_eff(events: list[dict]) -> pd.DataFrame:
+    """
+    Count clean, pace-only laps per driver across all loaded Race sessions.
+    Prefers 'race_laps_clean' if present; falls back to 'race_laps'.
+    Returns: DataFrame columns = ["Driver", "n_eff"]
+    """
+    frames: list[pd.DataFrame] = []
+    for ev in events:
+        laps = ev.get("race_laps_clean")
+        if laps is None or len(laps) == 0:
+            laps = ev.get("race_laps")
+        if laps is None or len(laps) == 0:
+            continue
+
+        d = laps.copy()
+        if "driver" not in d.columns:
+            # try to create a canonical 'driver'
+            if "Driver" in d.columns:
+                d["driver"] = d["Driver"].astype(str)
+            elif "DriverNumber" in d.columns:
+                d["driver"] = d["DriverNumber"].astype(str)
+            else:
+                continue
+
+        # lap_ok is your strict pace-only flag from the loader;
+        # if absent (e.g., using 'race_laps_clean'), treat all as ok.
+        lap_ok = d["lap_ok"].fillna(True).astype(bool) if "lap_ok" in d.columns else pd.Series(True, index=d.index)
+
+        frames.append(
+            d.loc[lap_ok, ["driver"]].rename(columns={"driver": "Driver"})
+        )
+
+    if not frames:
+        return pd.DataFrame(columns=["Driver", "n_eff"])
+
+    dd = pd.concat(frames, ignore_index=True)
+    out = dd.groupby("Driver", as_index=False).size().rename(columns={"size": "n_eff"})
+    return out
+
 
 # -------- Per-event wrapper --------
 def clean_event_payload(event: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
