@@ -16,6 +16,11 @@ logging.getLogger("fastf1").setLevel(logging.WARNING)
 warnings.filterwarnings("ignore", category=FutureWarning, module="fastf1.*")
 warnings.filterwarnings("ignore", category=FutureWarning, module="pandas.*")
 
+for name in ["fastf1", "fastf1.core", "fastf1.api", "fastf1.mvapi"]:
+    logging.getLogger(name).setLevel(logging.ERROR)
+    logging.getLogger(name).propagate = False
+
+
 
 # -------- Paths & Config --------
 def _project_root() -> Path:
@@ -440,8 +445,12 @@ def _compute_start_deltas(laps_raw: pd.DataFrame, ses: Any) -> pd.DataFrame:
             out["team"] = lap1["Team"].astype(str)
 
     out["grid_pos"] = pd.to_numeric(out["grid_pos"], errors="coerce")
+    out["grid_pos"] = pd.to_numeric(out["grid_pos"], errors="coerce")
+    # If grid is missing (some sessions don’t have it), fall back to lap-1 order
+    out["grid_pos"] = out["grid_pos"].fillna(out["pos_end_lap1"])
     out["start_delta"] = out["grid_pos"] - out["pos_end_lap1"]
-    return out[["driver", "team", "grid_pos", "pos_end_lap1", "start_delta"]].dropna(subset=["pos_end_lap1"]).reset_index(drop=True)
+    return out[["driver", "team", "grid_pos", "pos_end_lap1", "start_delta"]].dropna(
+        subset=["pos_end_lap1"]).reset_index(drop=True)
 
 
 # -------- Session Loading --------
@@ -621,9 +630,9 @@ def get_track_outline(config: Dict[str, Any]) -> Optional[pd.DataFrame]:
 
 # -------- Manual Test Runner --------
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     cfg = load_config("config/config.yaml")
     print(f"[INFO] Loaded config from: {(_project_root() / 'config/config.yaml').resolve()}")
-
     data = load_all_data(cfg)
     print(f"[INFO] Loaded events: {len(data)}")
     if data:
