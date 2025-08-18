@@ -303,10 +303,12 @@ def _moments_tau2(resid: pd.Series, se2: pd.Series, min_prior_var: float) -> flo
       Var(observed residuals) ≈ tau^2 + mean(se^2)
     """
     valid = resid.notna() & se2.notna() & (se2 >= 0)
-    if valid.sum() <= 1:
+    if valid.sum() <= 1 or se2[valid].size == 0:
         return max(min_prior_var, 0.0)
     var_obs = float(np.nanvar(resid[valid], ddof=1))
     mean_se2 = float(np.nanmean(se2[valid]))
+    if not np.isfinite(var_obs) or not np.isfinite(mean_se2):
+        return max(min_prior_var, 0.0)
     return max(var_obs - mean_se2, min_prior_var)
 
 
@@ -527,22 +529,44 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     d = d.copy()
     d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
 
-    base = f"lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
-    # Temperature spline (optional)
-    df_temp = int(cfg.get("race_spline_df_track_temp", 3))
+    base = f"lap_time_s ~ C(event) + C(compound) + bs(lap_on_tyre, df={df_age}, include_intercept=False) + bs(lap_number, df={df_lap}, include_intercept=False)"
+
+    # --- Temperature spline (optional, clamped to data richness) ---
+    df_temp_cfg = int(cfg.get("race_spline_df_track_temp", 3))
     use_temp_comp = bool(cfg.get("race_use_temp_compound_interaction", False))
-    if (df_temp > 0) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
-        base += f" + bs(track_temp_c_filled, df={df_temp})"
+    nuniq_temp = d["track_temp_c_filled"].nunique(dropna=True) if "track_temp_c_filled" in d.columns else 0
+    df_temp_use = max(1, min(df_temp_cfg, max(1, nuniq_temp - 1)))
+    used_temp = False
+    if (df_temp_use > 0) and (nuniq_temp >= 4) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
+        base += f" + bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
         if use_temp_comp:
-            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp})"
+            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
+        used_temp = True
 
     if use_age_interact:
-        base += f" + C(compound):bs(lap_on_tyre, df={df_age_int})"
+        base += f" + C(compound):bs(lap_on_tyre, df={df_age_int}, include_intercept=False)"
 
     # Optional track controls
     formula = _append_track_controls_to_formula(base, d, cfg)
+    used_track = (formula != base)
 
-    m = smf.ols(formula, data=d).fit(cov_type="HC3")
+    # --- Configurable SE type / clustering ---
+    se_type = str(cfg.get("race_se_type", "cluster")).lower()
+    cluster_group = str(cfg.get("race_cluster_group", "driver_event"))
+    group_map = {
+        "driver_event": d["driver_event"],
+        "driver": d["driver"],
+        "team": d["team"],
+        "event": d["event"],
+    }
+
+    if se_type == "cluster":
+        groups = group_map.get(cluster_group, d["driver_event"])
+        m = smf.ols(formula, data=d).fit(cov_type="cluster", cov_kwds={"groups": groups}, use_t=True)
+        se_label = "clustered"
+    else:
+        m = smf.ols(formula, data=d).fit(cov_type="HC3")
+        se_label = "HC3"
 
     d["pred"] = m.predict(d)
     intercept = float(m.params.get("Intercept", 0.0))
@@ -563,13 +587,21 @@ def race_metrics_corrections_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) ->
     out = mean_demeaned.reset_index()
     out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
     out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
-    out["race_model"] = "corrections_team(fe+spline" + (",track" if " + " in formula and formula != base else "") + ")"
+
+    flags = []
+    if used_temp:
+        flags.append("temp")
+    if used_track:
+        flags.append("track")
+    suffix = ("," + "+".join(flags)) if flags else ""
+    out["race_model"] = f"corrections_team(fe+spline,{se_label}{suffix})"
+
     return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
 def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Driver-within-team OLS with event FE + non-linear controls and cluster-robust SEs (+ optional track controls).
+    Driver-within-team OLS with event FE + non-linear controls and robust/clustered SEs (+ optional track controls).
     """
     d = _prep_race_columns(race_df)
     if d.empty:
@@ -583,27 +615,48 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 
     base = (
         f"lap_time_s ~ C(event) + C(team) + C(driver_team)"
-        + f" + bs(lap_on_tyre, df={df_age}) + bs(lap_number, df={df_lap})"
+        + f" + bs(lap_on_tyre, df={df_age}, include_intercept=False) + bs(lap_number, df={df_lap}, include_intercept=False)"
         + " + C(compound)"
     )
 
-    # Temperature spline (optional)
-    df_temp = int(cfg.get("race_spline_df_track_temp", 3))
+    # --- Temperature spline (optional, clamped to data richness) ---
+    df_temp_cfg = int(cfg.get("race_spline_df_track_temp", 3))
     use_temp_comp = bool(cfg.get("race_use_temp_compound_interaction", False))
-    if (df_temp > 0) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
-        base += f" + bs(track_temp_c_filled, df={df_temp})"
+    nuniq_temp = d["track_temp_c_filled"].nunique(dropna=True) if "track_temp_c_filled" in d.columns else 0
+    df_temp_use = max(1, min(df_temp_cfg, max(1, nuniq_temp - 1)))
+    used_temp = False
+    if (df_temp_use > 0) and (nuniq_temp >= 4) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
+        base += f" + bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
         if use_temp_comp:
-            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp})"
+            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
+        used_temp = True
 
     # Optional track controls
     formula = _append_track_controls_to_formula(base, d, cfg)
+    used_track = (formula != base)
 
+    # --- Configurable SE type / clustering ---
     d["cluster_id"] = d["driver_event"].astype(str)
-    m = smf.ols(formula, data=d).fit(
-        cov_type="cluster",
-        cov_kwds={"groups": d["cluster_id"]},
-        use_t=True,
-    )
+    se_type = str(cfg.get("race_se_type", "cluster")).lower()
+    cluster_group = str(cfg.get("race_cluster_group", "driver_event"))
+    group_map = {
+        "driver_event": d["driver_event"],
+        "driver": d["driver"],
+        "team": d["team"],
+        "event": d["event"],
+    }
+
+    if se_type == "cluster":
+        groups = group_map.get(cluster_group, d["driver_event"])
+        m = smf.ols(formula, data=d).fit(
+            cov_type="cluster",
+            cov_kwds={"groups": groups},
+            use_t=True,
+        )
+        se_label = "clustered"
+    else:
+        m = smf.ols(formula, data=d).fit(cov_type="HC3")
+        se_label = "HC3"
 
     intercept = float(m.params.get("Intercept", 0.0))
     d["pred"] = m.predict(d)
@@ -624,7 +677,15 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     out = mean_demeaned.reset_index()
     out["race_se_s"] = out.set_index(["driver", "team"]).index.map(se_by_driver)
     out["race_n"] = out.set_index(["driver", "team"]).index.map(n_by_driver).astype(int).values
-    out["race_model"] = "ols_team(fe+spline,clustered" + (",track" if " + " in formula and formula != base else "") + ")"
+
+    flags = []
+    if used_temp:
+        flags.append("temp")
+    if used_track:
+        flags.append("track")
+    suffix = ("," + "+".join(flags)) if flags else ""
+    out["race_model"] = f"ols_team(fe+spline,{se_label}{suffix})"
+
     return out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
 
 
@@ -848,6 +909,7 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
 
     # Attach track tags (no-op if metadata missing)
     dR_clean = _attach_event_track_tags(dR_clean, event, cfg)
+
     # --- Temperature covariate prep (fill NaNs with event median) ---
     dR_clean = dR_clean.copy()
     if "track_temp_c" not in dR_clean.columns:
@@ -857,8 +919,7 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
     # Prefer event/race summaries; fall back to in-sample median
     med_temp = np.nan
     try:
-        med_temp = float(
-            pd.to_numeric((event.get("weather_summary") or {}).get("median_track_temp_c"), errors="coerce"))
+        med_temp = float(pd.to_numeric((event.get("weather_summary") or {}).get("median_track_temp_c"), errors="coerce"))
     except Exception:
         pass
     if not np.isfinite(med_temp):
@@ -870,6 +931,15 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
         med_temp = float(dR_clean["track_temp_c_filled"].median())
 
     dR_clean["track_temp_c_filled"] = dR_clean["track_temp_c_filled"].fillna(med_temp)
+
+    # Telemetry (quiet one-liner)
+    try:
+        n_imp = int(pd.isna(dR_clean.get("track_temp_c")).sum())
+        n_have = int(dR_clean["track_temp_c_filled"].notna().sum())
+        logger.info("[race] track_temp_c: n=%d, imputed=%d, med=%.2f", n_have, n_imp, float(med_temp))
+    except Exception:
+        pass
+
     if dQ_clean is not None:
         dQ_clean = _attach_event_track_tags(dQ_clean, event, cfg)
 
