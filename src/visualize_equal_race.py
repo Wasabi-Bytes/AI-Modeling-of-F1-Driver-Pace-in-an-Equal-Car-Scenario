@@ -246,6 +246,27 @@ TEAM_COLORS = {
     "Haas": "#B6BABD", "UNKNOWN": "#888888",
 }
 
+# Map common feed/team-name variants to our palette keys
+TEAM_SYNONYMS = {
+    "red bull racing": "Red Bull",
+    "oracle red bull racing": "Red Bull",
+    "ferrari": "Ferrari",
+    "scuderia ferrari": "Ferrari",
+    "mercedes": "Mercedes",
+    "mercedes-amg": "Mercedes",
+    "mclaren": "McLaren",
+    "aston martin": "Aston Martin",
+    "alpine": "Alpine",
+    "bwt alpine": "Alpine",
+    "williams": "Williams",
+    "rb": "RB",
+    "racing bulls": "RB",
+    "sauber": "Sauber",
+    "kick sauber": "Sauber",
+    "haas f1 team": "Haas",
+    "haas": "Haas",
+}
+
 # === Personality loader (ADD) ===
 def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[str, float]]:
     """
@@ -348,7 +369,7 @@ def _list_event_metric_files() -> List[Path]:
 
 def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFrame]:
     """Prefer event_delta_s_shrunk if present; fallback to event_delta_s,
-    else (race, quali) with config wR/wQ."""
+    else (race, quali) with config wR/wQ (correctly weighted)."""
     gp_substr = gp_substr.lower()
     files = _list_event_metric_files()
     if not files: return None
@@ -372,7 +393,14 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     if drv is None or rcol is None:
         return None
     wR, wQ = _load_weights_from_config(cfg)
-    df["__evt_delta__"] = df[rcol].astype(float) + (wQ * df[qcol].astype(float) if qcol in df.columns else 0.0)
+
+    r = pd.to_numeric(df[rcol], errors="coerce")
+    if qcol in df.columns:
+        q = pd.to_numeric(df[qcol], errors="coerce")
+        df["__evt_delta__"] = (wR * r) + (wQ * q)   # FIXED: apply wR to race and wQ to quali
+    else:
+        df["__evt_delta__"] = (wR * r)
+
     out = df[[drv, "__evt_delta__"]].copy()
     out.columns = ["driver", "agg_delta_s"]
     out["driver"] = out["driver"].astype(str)
@@ -493,10 +521,16 @@ def _temp_multiplier_fn(cfg: dict, weather_summary: Optional[dict]) -> Callable[
 
 # ------------------- Colors per driver -------------------
 def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[str, int]) -> Dict[str, str]:
+    def _norm_team(t: str) -> str:
+        key = str(t or "").strip().lower()
+        return TEAM_SYNONYMS.get(key, t if t in TEAM_COLORS else "UNKNOWN")
+
     by_team: Dict[str, List[str]] = {}
     for d in drivers:
-        t = team_map.get(d, "UNKNOWN")
+        t_raw = team_map.get(d, "UNKNOWN")
+        t = _norm_team(t_raw)
         by_team.setdefault(t, []).append(d)
+
     colors = {}
     for team, ds in by_team.items():
         base = TEAM_COLORS.get(team, TEAM_COLORS["UNKNOWN"])
@@ -505,7 +539,8 @@ def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[st
         else:
             ds_sorted = sorted(ds, key=lambda z: num_map.get(z, 999))
             colors[ds_sorted[0]] = _darken_hex(base, 0.75)
-            for d in ds_sorted[1:]: colors[d] = base
+            for d in ds_sorted[1:]:
+                colors[d] = base
     return colors
 
 # ------------------- Reliability (per-lap from per-race target) -------------------
@@ -766,9 +801,7 @@ def simulate_progress(
 
     # Fallback to a generic straight if detection/metadata yields none
     if not zones:
-        zs = int(0.15 * P);
-        ze = int(0.35 * P);
-        zd = int(0.12 * P)
+        zs = int(0.15 * P); ze = int(0.35 * P); zd = int(0.12 * P)
         zones = [(zs, ze, zd)]
 
     det_eff = float(otk["drs_detect_thresh_s"])
@@ -844,10 +877,6 @@ def simulate_progress(
         "timestamp": int(time.time()),
         "weather_summary": weather_summary or {},
     }
-    # base "grid" order from pace deltas (lower -> ahead)
-    grid_order = list(np.argsort(deltas))
-    stats["grid_order"] = grid_order
-
     # base "grid" order from pace deltas (lower -> ahead)
     grid_order = list(np.argsort(deltas))
     stats["grid_order"] = grid_order
