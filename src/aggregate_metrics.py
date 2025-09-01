@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 import warnings
 import math
+import copy
 
 import numpy as np
 import pandas as pd
@@ -18,7 +19,6 @@ try:
     from shrinkage_hier import cap_and_fuse_rq, apply_ess_shrinkage, apply_team_prior
 except ImportError:
     from .shrinkage_hier import cap_and_fuse_rq, apply_ess_shrinkage, apply_team_prior
-
 
 
 # ---------- Paths ----------
@@ -491,6 +491,172 @@ def forecast_profile(events_df: pd.DataFrame, cfg: Dict[str, Any]) -> Optional[p
     return out.sort_values("forecast_delta_s", ignore_index=True)
 
 
+# ---------- Cross-validation over weights/decay ----------
+def _cv_param_grid(recency_mode: str) -> List[Dict[str, float]]:
+    """
+    Build a small, sane grid for (w_race, w_quali, decay).
+    - w_race, w_quali scale the sample factor (race_n vs quali_k).
+    - decay is per-event (if recency_mode=event_index) or half-life days (if date_half_life).
+    """
+    w_grid = [0.25, 0.5, 1.0, 2.0]
+    if recency_mode == "date_half_life":
+        decay_vals = [45.0, 90.0, 120.0, 180.0, 270.0]  # half-life days
+        grid = [{"w_race": wr, "w_quali": wq, "half_life_days": d} for wr in w_grid for wq in w_grid for d in decay_vals]
+    else:
+        decay_vals = [0.80, 0.88, 0.92, 0.96, 0.98]      # per-event decay λ
+        grid = [{"w_race": wr, "w_quali": wq, "event_decay": d} for wr in w_grid for wq in w_grid for d in decay_vals]
+    return grid
+
+
+def _build_groups(df: pd.DataFrame, group_by: str) -> pd.Series:
+    """
+    Return a grouping label for GroupKFold-like CV.
+    group_by: "event" -> hold out entire events
+              "track" -> hold out by track_type when available
+    """
+    if group_by == "track" and "track_type" in df.columns and df["track_type"].notna().any():
+        g = df["track_type"].astype(str)
+    else:
+        # default to event grouping
+        if "event_idx" in df.columns:
+            g = df["event_idx"].astype(int).astype(str)
+        else:
+            g = (df["year"].astype(str) + "|" + df["gp"].astype(str))
+    return g
+
+
+def _split_kfold(labels: pd.Series, k: int) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """
+    Deterministic simple GroupKFold substitute: assign each group an ordinal and mod by k.
+    Returns list of (train_idx, test_idx).
+    """
+    groups = labels.astype(str)
+    uniq = groups.drop_duplicates().reset_index(drop=True)
+    # deterministic order by appearance
+    g2fold = {g: (i % k) for i, g in enumerate(uniq)}
+    fold_id = groups.map(g2fold).astype(int)
+
+    splits = []
+    for f in range(k):
+        test_mask = (fold_id == f).to_numpy()
+        train_mask = ~test_mask
+        splits.append((np.where(train_mask)[0], np.where(test_mask)[0]))
+    return splits
+
+
+def _score_holdout(train_df: pd.DataFrame, test_df: pd.DataFrame, cfg: Dict[str, Any]) -> Tuple[float, float]:
+    """
+    Train on train_df (aggregate to per-driver delta), then predict each test row
+    using the train aggregate for that driver. Compute weighted MSE against the
+    observed event delta on the test set.
+
+    Returns (weighted_mse, weight_sum).
+    """
+    if train_df.empty or test_df.empty:
+        return 0.0, 0.0
+
+    # Aggregate on train with the given cfg
+    agg_train, _ = _aggregate_frame(train_df, cfg)
+
+    # Pick observed delta+se on test
+    test = test_df.copy()
+    delta_obs, se_obs = _choose_delta_and_se(test)
+    test["obs"] = delta_obs
+    test["se"] = se_obs
+    test = test.merge(agg_train[["driver", "agg_delta_s"]], on="driver", how="left").rename(columns={"agg_delta_s": "pred"})
+
+    # Guard weights and masks
+    w = _invvar(test["se"])
+    mask = test["obs"].notna() & test["pred"].notna() & (w > 0)
+    if mask.sum() == 0:
+        return 0.0, 0.0
+
+    err2 = (test.loc[mask, "pred"] - test.loc[mask, "obs"]) ** 2
+    wmse = float((w[mask] * err2).sum())
+    wsum = float(w[mask].sum())
+    return wmse, wsum
+
+
+def cross_validate_hyperparams(events_df: pd.DataFrame, base_cfg: Dict[str, Any],
+                               k_folds: int = 5, group_by: str = "event") -> Tuple[Dict[str, float], pd.DataFrame]:
+    """
+    Grid-search CV for (w_race, w_quali, decay λ), grouped by event or track.
+    Score: weighted MSE on held-out rows (weights = 1/SE^2), lower is better.
+
+    Returns (best_params, cv_table)
+    """
+    mode, event_decay_default, half_life_default = _read_recency_knobs(base_cfg)
+    grid = _cv_param_grid(mode)
+
+    labels = _build_groups(events_df, group_by=group_by)
+    n_groups = labels.drop_duplicates().shape[0]
+    k = max(2, min(k_folds, n_groups))  # clamp folds to groups
+    splits = _split_kfold(labels, k)
+
+    rows = []
+    for params in grid:
+        # Mutable copy of cfg
+        cfg = copy.deepcopy(base_cfg)
+        # Wire sample weights to weighting section (race/quali_n multipliers)
+        cfg.setdefault("weighting", {})
+        cfg["weighting"]["race_sample_weight"] = float(params["w_race"])
+        cfg["weighting"]["quali_sample_weight"] = float(params["w_quali"])
+        # Wire decay depending on mode
+        if mode == "date_half_life":
+            cfg["weighting"]["half_life_days"] = float(params["half_life_days"])
+        else:
+            cfg["weighting"]["event_recency_decay"] = float(params["event_decay"])
+            cfg["weighting"]["recency_mode"] = "event_index"
+
+        total_wmse = 0.0
+        total_w = 0.0
+        for train_idx, test_idx in splits:
+            train_df = events_df.iloc[train_idx]
+            test_df = events_df.iloc[test_idx]
+            wmse, wsum = _score_holdout(train_df, test_df, cfg)
+            total_wmse += wmse
+            total_w += wsum
+
+        score = (total_wmse / total_w) if total_w > 0 else np.inf
+        row = {
+            "recency_mode": mode,
+            "group_by": group_by,
+            "k_folds": k,
+            "w_race": params["w_race"],
+            "w_quali": params["w_quali"],
+            "score_wMSE": score,
+        }
+        if mode == "date_half_life":
+            row["half_life_days"] = params["half_life_days"]
+        else:
+            row["event_decay"] = params["event_decay"]
+        rows.append(row)
+
+    cv_table = pd.DataFrame(rows).sort_values("score_wMSE", ignore_index=True)
+    if cv_table.empty or not np.isfinite(cv_table.loc[0, "score_wMSE"]):
+        # Fallback to defaults
+        best_params = {
+            "w_race": 1.0,
+            "w_quali": 1.0,
+        }
+        if mode == "date_half_life":
+            best_params["half_life_days"] = float(half_life_default)
+        else:
+            best_params["event_decay"] = float(event_decay_default)
+        return best_params, cv_table
+
+    best_row = cv_table.iloc[0].to_dict()
+    best_params = {
+        "w_race": float(best_row["w_race"]),
+        "w_quali": float(best_row["w_quali"]),
+    }
+    if mode == "date_half_life":
+        best_params["half_life_days"] = float(best_row["half_life_days"])
+    else:
+        best_params["event_decay"] = float(best_row["event_decay"])
+    return best_params, cv_table
+
+
 # ---------- Main ----------
 def main():
     cfg = load_config("config/config.yaml")
@@ -540,14 +706,69 @@ def main():
         events_df["downforce_index"] = np.nan
         events_df["df_bucket"] = np.nan
 
-    # === Global aggregation (existing behavior) ===
-    driver_ranking_global, event_breakdown = aggregate_driver_metrics_global(events_df, cfg)
+    # ---------- Evidence-based selection of (w_race, w_quali, decay) ----------
+    unique_events = events_df["event_idx"].nunique()
+    group_by = "track" if ("track_type" in events_df.columns and events_df["track_type"].notna().nunique() >= 2) else "event"
+    can_cv = unique_events >= 6  # need a handful of events to cross-validate sensibly
+
+    best_params = {}
+    cv_table = pd.DataFrame()
+    mode, event_decay_default, half_life_default = _read_recency_knobs(cfg)
+
+    if can_cv:
+        best_params, cv_table = cross_validate_hyperparams(
+            events_df=events_df,
+            base_cfg=cfg,
+            k_folds=5,
+            group_by=group_by
+        )
+        # Save CV table
+        cv_csv = out_dir / "cv_hyperparams.csv"
+        cv_table.to_csv(cv_csv, index=False)
+        if not cv_table.empty:
+            best_row = cv_table.iloc[0].to_dict()
+            print(
+                f"[INFO] CV (mode={best_row.get('recency_mode')}, group_by={best_row.get('group_by')}, "
+                f"k={int(best_row.get('k_folds', 0))}) -> "
+                f"best w_race={best_row['w_race']:.2f}, w_quali={best_row['w_quali']:.2f}, "
+                + (f"lambda={best_row['event_decay']:.3f}" if mode != "date_half_life" else f"half_life_days={best_row['half_life_days']:.1f}")
+                + f", score wMSE={best_row['score_wMSE']:.6f}"
+            )
+            print(f"[INFO] Wrote: {cv_csv}")
+    else:
+        # Skip CV; use config defaults
+        print(f"[INFO] Not enough events for CV (have {unique_events}); using config weights/decay.")
+        best_params = {"w_race": float(cfg.get("weighting", {}).get("race_sample_weight", 1.0)),
+                       "w_quali": float(cfg.get("weighting", {}).get("quali_sample_weight", 1.0))}
+        if mode == "date_half_life":
+            best_params["half_life_days"] = float(cfg.get("weighting", {}).get("half_life_days", half_life_default))
+        else:
+            best_params["event_decay"] = float(cfg.get("weighting", {}).get("event_recency_decay", event_decay_default))
+
+    # Apply selected hyperparams for final aggregation (no mutation of file on disk)
+    cfg_final = copy.deepcopy(cfg)
+    cfg_final.setdefault("weighting", {})
+    cfg_final["weighting"]["race_sample_weight"] = float(best_params["w_race"])
+    cfg_final["weighting"]["quali_sample_weight"] = float(best_params["w_quali"])
+    if mode == "date_half_life":
+        cfg_final["weighting"]["half_life_days"] = float(best_params["half_life_days"])
+        cfg_final["weighting"]["recency_mode"] = "date_half_life"
+        print(f"[INFO] Using CV-selected weights: w_race={best_params['w_race']:.2f}, w_quali={best_params['w_quali']:.2f}, "
+              f"half_life_days={best_params['half_life_days']:.1f}")
+    else:
+        cfg_final["weighting"]["event_recency_decay"] = float(best_params["event_decay"])
+        cfg_final["weighting"]["recency_mode"] = "event_index"
+        print(f"[INFO] Using CV-selected weights: w_race={best_params['w_race']:.2f}, w_quali={best_params['w_quali']:.2f}, "
+              f"lambda={best_params['event_decay']:.3f}")
+
+    # === Global aggregation (now with tuned weights/decay) ===
+    driver_ranking_global, event_breakdown = aggregate_driver_metrics_global(events_df, cfg_final)
 
     # === Archetype aggregation (if meta present) ===
-    driver_ranking_by_arch = aggregate_driver_metrics_by_archetype(events_df, cfg)
+    driver_ranking_by_arch = aggregate_driver_metrics_by_archetype(events_df, cfg_final)
 
     # === Forecast profile (blend archetype + global) ===
-    driver_forecast = forecast_profile(events_df, cfg)
+    driver_forecast = forecast_profile(events_df, cfg_final)
 
     # ---- Save outputs ----
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -572,6 +793,8 @@ def main():
 if __name__ == "__main__":
     main()
 
+
+# ---------- (Legacy helper kept intact) ----------
 def assemble_driver_table(deltas: pd.DataFrame, n_eff: pd.DataFrame) -> pd.DataFrame:
     """
     deltas: DataFrame with columns ["Driver","Team","delta_R","se_R","delta_Q","se_Q"]
