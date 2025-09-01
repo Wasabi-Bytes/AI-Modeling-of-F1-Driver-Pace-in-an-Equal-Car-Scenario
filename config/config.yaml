@@ -234,3 +234,11 @@ logging:
   level: "INFO"
   write_run_log: true
   diagnostics_dir: "outputs/diagnostics"
+
+championship:
+  year: 2024           # <- which season to use (if omitted, uses the most recent in metrics)
+  use_all_tracks: true # <- auto-pull the full schedule from outputs/metrics/all_events_metrics.csv
+
+# Deterministic “pure pace” mode (optional)
+simulation:
+  add_noise: false
