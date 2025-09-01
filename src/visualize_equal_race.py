@@ -27,8 +27,8 @@ DT = 0.5
 
 LAP_JITTER_SD = 0.12
 START_REACTION_SD = 0.12
-START_GAIN_SD = 0.08         # random T1 gain/loss, seconds (small)
-START_GAIN_RANK_BIAS = 0.0   # >0 lets mid/back gain a touch on avg
+START_GAIN_SD = 0.08  # random T1 gain/loss, seconds (small)
+START_GAIN_RANK_BIAS = 0.0  # >0 lets mid/back gain a touch on avg
 
 # Event deltas
 USE_EVENT_SPECIFIC_DELTAS = True
@@ -36,14 +36,15 @@ TARGET_GP_SUBSTR = "canadian"  # e.g. "british", "austrian", "hungarian"
 
 # DRS/Overtaking (base; can be overridden by config + track overrides)
 DRS_DETECTION_THRESH_S = 1.0
-OVERTAKE_ALPHA_PACE = 6.0      # coefficient on normalized pace gap
-OVERTAKE_BETA_DRS = 1.5        # bonus when DRS slipstream active
-OVERTAKE_GAMMA_DEFEND = 1.2    # reduction when leader defended earlier in lap
-DIRTY_AIR_PENALTY = 0.15       # constant penalty (track-specific, worse at Monaco)
-DRS_SLIPSTREAM_BONUS = 0.02    # used to decide if "slip" is active
+OVERTAKE_ALPHA_PACE = 6.0  # coefficient on normalized pace gap
+OVERTAKE_BETA_DRS = 1.5  # bonus when DRS slipstream active
+OVERTAKE_GAMMA_DEFEND = 1.2  # reduction when leader defended earlier in lap
+DIRTY_AIR_PENALTY = 0.15  # constant penalty (track-specific, worse at Monaco)
+DRS_SLIPSTREAM_BONUS = 0.02  # used to decide if "slip" is active
 DRS_COOLDOWN_AFTER_SC_LAPS = 2
 DRS_MIN_ENABLE_LAP = 3
 DETECTION_OFFSET_FRACTION = 0.03
+
 
 # --- Calibrated degradation params loader & curve helper ---
 def _cfg_get(cfg: dict, path: List[str], default):
@@ -54,6 +55,7 @@ def _cfg_get(cfg: dict, path: List[str], default):
             return default
         d = d[k]
     return d
+
 
 def _load_degradation_params(cfg: dict) -> Optional[dict]:
     path = _cfg_get(cfg, ["paths", "degradation_params"], None)
@@ -68,6 +70,7 @@ def _load_degradation_params(cfg: dict) -> Optional[dict]:
     except Exception:
         return None
 
+
 def _curve_from_params(n_laps: int, params_obj: dict) -> np.ndarray:
     """Build cumulative degradation curve from {early_slope, late_slope, switch_lap}."""
     e = float(params_obj.get("early_slope", 0.0))
@@ -77,6 +80,7 @@ def _curve_from_params(n_laps: int, params_obj: dict) -> np.ndarray:
     early = np.minimum(t, sw) * e
     late = np.maximum(t - sw, 0.0) * l
     return early + late
+
 
 # Safety Car / VSC (configurable default)
 P_INCIDENT_PER_LAP_DEFAULT = 0.03
@@ -88,10 +92,10 @@ VSC_DURATION_SEC_MINMAX = (12.0, 32.0)
 SC_STAGGER_GAP_FRAC = 0.003
 
 # Reliability (new: specify per-race DNF target; per-lap is derived)
-RELIABILITY_MODE = "per_race"      # "per_race" | "per_lap"
-RELIABILITY_PER_RACE_DNF = 0.10    # ~10% chance a car DNFs over a typical race
-RELIABILITY_TYPICAL_LAPS = 70      # translate to per-lap hazard ~ 1 - (1-0.10)^(1/70) ≈ 0.0015
-RELIABILITY_PER_LAP = 0.0          # only used if RELIABILITY_MODE == "per_lap"
+RELIABILITY_MODE = "per_race"  # "per_race" | "per_lap"
+RELIABILITY_PER_RACE_DNF = 0.10  # ~10% chance a car DNFs over a typical race
+RELIABILITY_TYPICAL_LAPS = 70  # translate to per-lap hazard ~ 1 - (1-0.10)^(1/70) ≈ 0.0015
+RELIABILITY_PER_LAP = 0.0  # only used if RELIABILITY_MODE == "per_lap"
 
 # Playback speeds
 RANDOM_SEED = 42
@@ -102,6 +106,7 @@ SHOW_MARKER_LABELS = False
 RC_WRAP_WIDTH = 48
 DRS_TAG = "ⓓ"  # marks DRS on leaderboard gaps
 
+
 # ------------------- Track meta helpers (NEW) -------------------
 def _norm_event_key_str(s: str) -> str:
     if not isinstance(s, str):
@@ -109,10 +114,12 @@ def _norm_event_key_str(s: str) -> str:
     cleaned = "".join(ch.lower() if ch.isalnum() or ch.isspace() else " " for ch in s)
     return " ".join(cleaned.split())
 
+
 def _norm_event_key(year: Optional[int], gp: Optional[str]) -> str:
     y = "" if pd.isna(year) else str(int(year))
     g = "" if gp is None else str(gp)
     return _norm_event_key_str(f"{y} {g}")
+
 
 def _load_viz_track_meta(cfg: dict) -> Optional[dict]:
     """
@@ -147,44 +154,58 @@ def _load_viz_track_meta(cfg: dict) -> Optional[dict]:
     r0 = row.iloc[0]
     out = {
         "track_type": str(r0.get(cols.get("track_type", "track_type"), "")).strip().lower() or None,
-        "downforce_index": pd.to_numeric(r0.get(cols.get("downforce_index", "downforce_index"), np.nan), errors="coerce"),
-        "drs_zones": int(pd.to_numeric(r0.get(cols.get("drs_zones", "drs_zones"), np.nan), errors="coerce")) if not pd.isna(r0.get(cols.get("drs_zones", "drs_zones"), np.nan)) else None,
+        "downforce_index": pd.to_numeric(r0.get(cols.get("downforce_index", "downforce_index"), np.nan),
+                                         errors="coerce"),
+        "drs_zones": int(
+            pd.to_numeric(r0.get(cols.get("drs_zones", "drs_zones"), np.nan), errors="coerce")) if not pd.isna(
+            r0.get(cols.get("drs_zones", "drs_zones"), np.nan)) else None,
         "speed_bias": pd.to_numeric(r0.get(cols.get("speed_bias", "speed_bias"), np.nan), errors="coerce"),
-        "overtaking_difficulty": pd.to_numeric(r0.get(cols.get("overtaking_difficulty", "overtaking_difficulty"), np.nan), errors="coerce"),
+        "overtaking_difficulty": pd.to_numeric(
+            r0.get(cols.get("overtaking_difficulty", "overtaking_difficulty"), np.nan), errors="coerce"),
     }
     return out
+
 
 # ------------------- Utilities -------------------
 def _darken_hex(hex_color: str, factor: float = 0.75) -> str:
     hex_color = hex_color.lstrip("#")
-    r = int(hex_color[0:2], 16); g = int(hex_color[2:4], 16); b = int(hex_color[4:6], 16)
+    r = int(hex_color[0:2], 16);
+    g = int(hex_color[2:4], 16);
+    b = int(hex_color[4:6], 16)
     r = max(0, min(255, int(r * factor)))
     g = max(0, min(255, int(g * factor)))
     b = max(0, min(255, int(b * factor)))
     return f"#{r:02x}{g:02x}{b:02x}"
 
+
 def _wrap_line(s: str, width: int = 44) -> str:
     out, line = [], []
     for word in str(s).split():
-        if sum(len(w)+1 for w in line+[word]) > width:
-            out.append(" ".join(line)); line = [word]
+        if sum(len(w) + 1 for w in line + [word]) > width:
+            out.append(" ".join(line));
+            line = [word]
         else:
             line.append(word)
     if line: out.append(" ".join(line))
     return "<br>".join(out)
 
+
 def _path_length(xy: np.ndarray) -> Tuple[np.ndarray, float]:
-    dx = np.diff(xy[:, 0]); dy = np.diff(xy[:, 1])
+    dx = np.diff(xy[:, 0]);
+    dy = np.diff(xy[:, 1])
     ds = np.sqrt(dx * dx + dy * dy)
     s = np.concatenate([[0.0], np.cumsum(ds)])
     return s, float(s[-1])
+
 
 def _resample_path(xy: np.ndarray, n: int = 2000) -> np.ndarray:
     s, total = _path_length(xy)
     if total == 0: return np.repeat(xy[:1], n, axis=0)
     t = np.linspace(0, total, n)
-    x = np.interp(t, s, xy[:, 0]); y = np.interp(t, s, xy[:, 1])
+    x = np.interp(t, s, xy[:, 0]);
+    y = np.interp(t, s, xy[:, 1])
     return np.column_stack([x, y])
+
 
 def _curvature(xy: np.ndarray) -> np.ndarray:
     P = xy.shape[0]
@@ -192,13 +213,16 @@ def _curvature(xy: np.ndarray) -> np.ndarray:
     v = np.diff(xy, axis=0)
     ang = np.arctan2(v[:, 1], v[:, 0])
     d_ang = np.diff(ang, prepend=ang[0])
-    d_ang = np.abs(np.mod(d_ang + np.pi, 2*np.pi) - np.pi)
+    d_ang = np.abs(np.mod(d_ang + np.pi, 2 * np.pi) - np.pi)
     k = 7
     pad = np.pad(d_ang, (k, k), mode="wrap")
     ker = np.ones(2 * k + 1) / (2 * k + 1)
     sm = np.convolve(pad, ker, mode="same")[k:-k]
-    sm_full = np.empty(P, dtype=float); sm_full[:-1] = sm; sm_full[-1] = sm[0]
+    sm_full = np.empty(P, dtype=float);
+    sm_full[:-1] = sm;
+    sm_full[-1] = sm[0]
     return sm_full
+
 
 def _find_drs_zones(xy: np.ndarray, min_frac: float = 0.08, curv_thresh: float = 0.002) -> List[Tuple[int, int, int]]:
     P = xy.shape[0]
@@ -216,8 +240,10 @@ def _find_drs_zones(xy: np.ndarray, min_frac: float = 0.08, curv_thresh: float =
                     break
             end = (j - 1) % P
             zones.append((i, end))
-            if j > i: i = j
-            else: break
+            if j > i:
+                i = j
+            else:
+                break
         else:
             i += 1
 
@@ -225,7 +251,9 @@ def _find_drs_zones(xy: np.ndarray, min_frac: float = 0.08, curv_thresh: float =
         merged = (zones[-1][0], zones[0][1])
         zones = [merged] + zones[1:-1]
 
-    def _seg_len(a, b): return (b - a + 1) if a <= b else (P - a) + (b + 1)
+    def _seg_len(a, b):
+        return (b - a + 1) if a <= b else (P - a) + (b + 1)
+
     min_len = max(1, int(min_frac * P))
     zones = [(a, b) for (a, b) in zones if _seg_len(a, b) >= min_len]
     zones.sort(key=lambda z: _seg_len(z[0], z[1]), reverse=True)
@@ -237,6 +265,7 @@ def _find_drs_zones(xy: np.ndarray, min_frac: float = 0.08, curv_thresh: float =
         det = (a - det_off) % P
         out.append((a, b, det))
     return out
+
 
 # ------------------- Team colors -------------------
 TEAM_COLORS = {
@@ -267,6 +296,7 @@ TEAM_SYNONYMS = {
     "haas": "Haas",
 }
 
+
 # === Personality loader (ADD) ===
 def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[str, float]]:
     """
@@ -296,21 +326,28 @@ def _load_personality_scores(cfg: dict, drivers: list[str]) -> Dict[str, Dict[st
         d = str(r[low["driver"]])
         out[d] = {
             "aggression": float(_clamp01(r[low["aggression"]])) if pd.notna(r[low["aggression"]]) else 0.5,
-            "defence":   float(_clamp01(r[low["defence"]]))   if pd.notna(r[low["defence"]])   else 0.5,
-            "risk":      float(_clamp01(r[low["risk"]]))      if pd.notna(r[low["risk"]])      else 0.5,
-            "aggression_se": float(pd.to_numeric(r.get(low.get("aggression_se",""), np.nan), errors="coerce")) if "aggression_se" in low else np.nan,
-            "defence_se":   float(pd.to_numeric(r.get(low.get("defence_se",""),   np.nan), errors="coerce")) if "defence_se" in low else np.nan,
-            "risk_se":      float(pd.to_numeric(r.get(low.get("risk_se",""),      np.nan), errors="coerce")) if "risk_se" in low else np.nan,
+            "defence": float(_clamp01(r[low["defence"]])) if pd.notna(r[low["defence"]]) else 0.5,
+            "risk": float(_clamp01(r[low["risk"]])) if pd.notna(r[low["risk"]]) else 0.5,
+            "aggression_se": float(pd.to_numeric(r.get(low.get("aggression_se", ""), np.nan),
+                                                 errors="coerce")) if "aggression_se" in low else np.nan,
+            "defence_se": float(pd.to_numeric(r.get(low.get("defence_se", ""), np.nan),
+                                              errors="coerce")) if "defence_se" in low else np.nan,
+            "risk_se": float(
+                pd.to_numeric(r.get(low.get("risk_se", ""), np.nan), errors="coerce")) if "risk_se" in low else np.nan,
         }
     for d in drivers:
-        out.setdefault(d, {"aggression":0.5,"defence":0.5,"risk":0.5,"aggression_se":np.nan,"defence_se":np.nan,"risk_se":np.nan})
+        out.setdefault(d,
+                       {"aggression": 0.5, "defence": 0.5, "risk": 0.5, "aggression_se": np.nan, "defence_se": np.nan,
+                        "risk_se": np.nan})
     return out
+
 
 # ------------------- Driver mapping helpers -------------------
 def _infer_driver_cols(df: pd.DataFrame) -> str:
-    for c in ["driver","Driver","Abbreviation","DriverNumber","DriverId","BroadcastName","FullName"]:
+    for c in ["driver", "Driver", "Abbreviation", "DriverNumber", "DriverId", "BroadcastName", "FullName"]:
         if c in df.columns: return c
     return df.columns[0]
+
 
 def _get_driver_team_map_from_recent() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, int]]:
     try:
@@ -322,9 +359,11 @@ def _get_driver_team_map_from_recent() -> Tuple[Dict[str, str], Dict[str, str], 
         if laps is None or len(laps) == 0: raise RuntimeError("No laps to infer mapping")
         dcol = _infer_driver_cols(laps)
         drivers = laps[[dcol]].dropna().astype(str).drop_duplicates()
-        team_col = next((c for c in ["team","Team","Constructor","TeamName","ConstructorName"] if c in laps.columns), None)
-        name_col = next((c for c in ["Abbreviation","FullName","BroadcastName","Driver","DriverId"] if c in laps.columns), None)
-        num_col  = next((c for c in ["DriverNumber","Number","CarNumber"] if c in laps.columns), None)
+        team_col = next(
+            (c for c in ["team", "Team", "Constructor", "TeamName", "ConstructorName"] if c in laps.columns), None)
+        name_col = next(
+            (c for c in ["Abbreviation", "FullName", "BroadcastName", "Driver", "DriverId"] if c in laps.columns), None)
+        num_col = next((c for c in ["DriverNumber", "Number", "CarNumber"] if c in laps.columns), None)
 
         team_map, name_map, num_map = {}, {}, {}
         for dr in drivers[dcol].tolist():
@@ -334,16 +373,18 @@ def _get_driver_team_map_from_recent() -> Tuple[Dict[str, str], Dict[str, str], 
             nnum = pd.to_numeric(sub[num_col], errors="coerce").dropna() if num_col else pd.Series([], dtype=float)
             team_map[str(dr)] = str(tser.iloc[0]) if not tser.empty else "UNKNOWN"
             name_map[str(dr)] = str(nser.iloc[0]) if not nser.empty else str(dr)
-            num_map[str(dr)]  = int(nnum.iloc[0]) if not nnum.empty else 999
+            num_map[str(dr)] = int(nnum.iloc[0]) if not nnum.empty else 999
         return team_map, name_map, num_map
     except Exception:
         return {}, {}, {}
+
 
 # ------------------- Inputs -------------------
 def _load_weights_from_config(cfg: dict) -> Tuple[float, float]:
     wR = float(cfg.get("wR", cfg.get("wr", 0.6)))
     wQ = float(cfg.get("wQ", cfg.get("wq", 0.4)))
     return wR, wQ
+
 
 def _normalize_delta_convention(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     """
@@ -369,12 +410,14 @@ def _normalize_delta_convention(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
         # Heuristic: if the distribution skews clearly positive and the max positive magnitude
         # dominates the negative side, treat as 'advantage positive' and invert.
         q10, q50, q90 = series.quantile([0.1, 0.5, 0.9])
-        max_pos = float(series.max()); min_neg = float(series.min())
+        max_pos = float(series.max());
+        min_neg = float(series.min())
         if (q50 > 0) and (max_pos > abs(min_neg) * 1.1):
             out["agg_delta_s"] = -series
         return out
     # default: already 'loss_is_positive'
     return out
+
 
 def load_driver_ranking_global(cfg: Optional[dict] = None) -> pd.DataFrame:
     if cfg is None:
@@ -389,8 +432,10 @@ def load_driver_ranking_global(cfg: Optional[dict] = None) -> pd.DataFrame:
     keep = [driver_col, delta_col] + ([se_col] if se_col else [])
     out = df[keep].copy()
     out.rename(columns={driver_col: "driver", delta_col: "agg_delta_s"}, inplace=True)
-    if se_col: out.rename(columns={se_col: "agg_se_s"}, inplace=True)
-    else: out["agg_se_s"] = np.nan
+    if se_col:
+        out.rename(columns={se_col: "agg_se_s"}, inplace=True)
+    else:
+        out["agg_se_s"] = np.nan
     out["driver"] = out["driver"].astype(str)
     out["agg_delta_s"] = pd.to_numeric(out["agg_delta_s"], errors="coerce")
     out = _normalize_delta_convention(out, cfg)
@@ -398,9 +443,11 @@ def load_driver_ranking_global(cfg: Optional[dict] = None) -> pd.DataFrame:
     out["agg_se_s"] = pd.to_numeric(out["agg_se_s"], errors="coerce")
     return out
 
+
 def _list_event_metric_files() -> List[Path]:
     mdir = PROJ / "outputs" / "metrics"
     return sorted(mdir.glob("*-event_metrics.csv")) if mdir.exists() else []
+
 
 def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFrame]:
     """Prefer event_delta_s_shrunk if present; fallback to event_delta_s,
@@ -425,7 +472,8 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
         out = _normalize_delta_convention(out, cfg)
         return out.dropna(subset=["agg_delta_s"])
 
-    rcol = low.get("race_delta_s"); qcol = low.get("quali_delta_s")
+    rcol = low.get("race_delta_s");
+    qcol = low.get("quali_delta_s")
     if drv is None or rcol is None:
         return None
     wR, wQ = _load_weights_from_config(cfg)
@@ -433,7 +481,7 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     r = pd.to_numeric(df[rcol], errors="coerce")
     if qcol in df.columns:
         q = pd.to_numeric(df[qcol], errors="coerce")
-        df["__evt_delta__"] = (wR * r) + (wQ * q)   # wR on race, wQ on quali
+        df["__evt_delta__"] = (wR * r) + (wQ * q)  # wR on race, wQ on quali
     else:
         df["__evt_delta__"] = (wR * r)
 
@@ -444,6 +492,7 @@ def load_driver_ranking_event(cfg: dict, gp_substr: str) -> Optional[pd.DataFram
     out = _normalize_delta_convention(out, cfg)
     return out.dropna(subset=["agg_delta_s"])
 
+
 def load_track_outline(cfg: dict) -> np.ndarray:
     if "cache_dir" in cfg: enable_cache(cfg["cache_dir"])
     df = get_track_outline(cfg)  # Montreal by default via config
@@ -453,6 +502,7 @@ def load_track_outline(cfg: dict) -> np.ndarray:
     if scale > 0: xy /= scale
     return _resample_path(xy, n=2500)
 
+
 # ------------------- Track & config helpers -------------------
 def _current_gp_name(cfg: dict) -> str:
     try:
@@ -460,6 +510,7 @@ def _current_gp_name(cfg: dict) -> str:
         return str(gp)
     except Exception:
         return ""
+
 
 def _track_type_from_cfg(cfg: dict, meta: Optional[dict] = None) -> str:
     # Prefer metadata if available
@@ -473,6 +524,7 @@ def _track_type_from_cfg(cfg: dict, meta: Optional[dict] = None) -> str:
         return "street"
     return "permanent"
 
+
 def _apply_track_overrides(base: dict, cfg: dict) -> dict:
     """Apply overtaking.track_overrides if GP substring matches."""
     gp = _current_gp_name(cfg).lower()
@@ -484,10 +536,12 @@ def _apply_track_overrides(base: dict, cfg: dict) -> dict:
                 out[k] = v
     return out
 
+
 # ------------------- WEATHER: summary + temp multiplier -------------------
 def _extract_weather_summary_from_laps(laps: Optional[pd.DataFrame]) -> Optional[dict]:
     if laps is None or len(laps) == 0:
         return None
+
     def med(colnames: List[str]):
         for c in colnames:
             if c in laps.columns:
@@ -495,12 +549,14 @@ def _extract_weather_summary_from_laps(laps: Optional[pd.DataFrame]) -> Optional
                 if v.notna().any():
                     return float(v.median())
         return np.nan
+
     return {
         "median_track_temp_c": med(["track_temp_c", "TrackTemp", "TrackTempC"]),
         "median_air_temp_c": med(["air_temp_c", "AirTemp", "AirTempC"]),
         "median_wind_kph": med(["wind_speed_kph", "wind_kph", "WindSpeed", "WindKph"]),
         "median_humidity_pct": med(["humidity_pct", "RelHumidity", "HumidityPct"]),
     }
+
 
 def _load_weather_summary_for_viz(cfg: dict) -> Optional[dict]:
     """Use the event's weather_summary medians if available; else compute medians from laps."""
@@ -521,13 +577,17 @@ def _load_weather_summary_for_viz(cfg: dict) -> Optional[dict]:
         # Keep only expected keys (robustness)
         out = {
             "median_track_temp_c": float(pd.to_numeric(ws.get("median_track_temp_c"), errors="coerce")),
-            "median_air_temp_c": float(pd.to_numeric(ws.get("median_air_temp_c"), errors="coerce")) if "median_air_temp_c" in ws else np.nan,
-            "median_wind_kph": float(pd.to_numeric(ws.get("median_wind_kph"), errors="coerce")) if "median_wind_kph" in ws else np.nan,
-            "median_humidity_pct": float(pd.to_numeric(ws.get("median_humidity_pct"), errors="coerce")) if "median_humidity_pct" in ws else np.nan,
+            "median_air_temp_c": float(
+                pd.to_numeric(ws.get("median_air_temp_c"), errors="coerce")) if "median_air_temp_c" in ws else np.nan,
+            "median_wind_kph": float(
+                pd.to_numeric(ws.get("median_wind_kph"), errors="coerce")) if "median_wind_kph" in ws else np.nan,
+            "median_humidity_pct": float(pd.to_numeric(ws.get("median_humidity_pct"),
+                                                       errors="coerce")) if "median_humidity_pct" in ws else np.nan,
         }
         return out
     # Fallback: compute from laps
     return _extract_weather_summary_from_laps(laps)
+
 
 def _temp_multiplier_fn(cfg: dict, weather_summary: Optional[dict]) -> Callable[[str], float]:
     """
@@ -550,11 +610,14 @@ def _temp_multiplier_fn(cfg: dict, weather_summary: Optional[dict]) -> Callable[
         return lambda _c: 1.0
 
     dT = T - base_c
+
     def f(compound: str) -> float:
         s = float(sens.get(str(compound).upper(), 1.0))
         mult = 1.0 + s * k * dT
         return float(np.clip(mult, 1.0 + clip_lo, 1.0 + clip_hi))
+
     return f
+
 
 # ------------------- Colors per driver -------------------
 def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[str, int]) -> Dict[str, str]:
@@ -579,6 +642,7 @@ def assign_colors(drivers: List[str], team_map: Dict[str, str], num_map: Dict[st
             for d in ds_sorted[1:]:
                 colors[d] = base
     return colors
+
 
 # ------------------- Reliability (per-lap from per-race target) -------------------
 def per_lap_dnf_probability(cfg: dict, n_laps: int, risk_vec: Optional[np.ndarray] = None) -> np.ndarray:
@@ -608,6 +672,7 @@ def per_lap_dnf_probability(cfg: dict, n_laps: int, risk_vec: Optional[np.ndarra
     p_pl_vec = 1.0 - (1.0 - p_race) ** (1.0 / float(typical))
     return p_pl_vec
 
+
 # ------------------- Degradation model (piecewise per compound) -------------------
 def _compound_for_all(cfg: dict, rng: np.random.Generator, D: int) -> List[str]:
     """Choose a compound per driver. If degradation.compound_mix exists, sample;
@@ -620,6 +685,7 @@ def _compound_for_all(cfg: dict, rng: np.random.Generator, D: int) -> List[str]:
         return rng.choice(keys, size=D, p=probs).tolist()
     default = str(_cfg_get(cfg, ["degradation", "default_compound"], "M")).upper()
     return [default] * D
+
 
 def _deg_params_for(compound: str, cfg: dict, track_type: str) -> Tuple[float, float, int, float]:
     """Return early_slope, late_slope (s/lap), switch_lap, track_mult."""
@@ -635,13 +701,14 @@ def _deg_params_for(compound: str, cfg: dict, track_type: str) -> Tuple[float, f
     track_mult = float(mults.get(track_type, 1.0))
     return e, l, sw, track_mult
 
+
 def build_degradation_matrix(
-    cfg: dict,
-    n_laps: int,
-    drivers: List[str],
-    rng: np.random.Generator,
-    meta: Optional[dict] = None,
-    temp_mult_fn: Optional[Callable[[str], float]] = None,
+        cfg: dict,
+        n_laps: int,
+        drivers: List[str],
+        rng: np.random.Generator,
+        meta: Optional[dict] = None,
+        temp_mult_fn: Optional[Callable[[str], float]] = None,
 ) -> np.ndarray:
     """
     Return (n_laps, D) additive degradation in seconds per car.
@@ -661,6 +728,7 @@ def build_degradation_matrix(
     source = str(_cfg_get(cfg, ["degradation", "source"], "linear")).lower()
 
     scale_block = _cfg_get(cfg, ["degradation", "compound_scale"], {}) or {}
+
     def _scale_for(c: str) -> float:
         return float(scale_block.get(str(c).upper(), 1.0))
 
@@ -704,6 +772,7 @@ def build_degradation_matrix(
         out[:, j] = tm * _scale_for(c) * mult * (early + late).ravel()
     return out
 
+
 # ------------------- Overtaking params from config (+ track overrides & META) -------------------
 def get_overtake_params(cfg: dict, meta: Optional[dict] = None) -> Dict[str, float]:
     base = {
@@ -712,9 +781,11 @@ def get_overtake_params(cfg: dict, meta: Optional[dict] = None) -> Dict[str, flo
         "gamma_defend": float(_cfg_get(cfg, ["overtaking", "gamma_defend"], OVERTAKE_GAMMA_DEFEND)),
         "dirty_air_penalty": float(_cfg_get(cfg, ["overtaking", "dirty_air_penalty"], DIRTY_AIR_PENALTY)),
         "drs_detect_thresh_s": float(_cfg_get(cfg, ["overtaking", "drs_detect_thresh_s"], DRS_DETECTION_THRESH_S)),
-        "detection_offset_fraction": float(_cfg_get(cfg, ["overtaking", "detection_offset_fraction"], DETECTION_OFFSET_FRACTION)),
+        "detection_offset_fraction": float(
+            _cfg_get(cfg, ["overtaking", "detection_offset_fraction"], DETECTION_OFFSET_FRACTION)),
         "drs_min_enable_lap": int(_cfg_get(cfg, ["overtaking", "drs_min_enable_lap"], DRS_MIN_ENABLE_LAP)),
-        "drs_cooldown_after_sc_laps": int(_cfg_get(cfg, ["overtaking", "drs_cooldown_after_sc_laps"], DRS_COOLDOWN_AFTER_SC_LAPS)),
+        "drs_cooldown_after_sc_laps": int(
+            _cfg_get(cfg, ["overtaking", "drs_cooldown_after_sc_laps"], DRS_COOLDOWN_AFTER_SC_LAPS)),
     }
     # YAML string overrides via substring match
     base = _apply_track_overrides(base, cfg)
@@ -731,6 +802,7 @@ def get_overtake_params(cfg: dict, meta: Optional[dict] = None) -> Dict[str, flo
             base["dirty_air_penalty"] = float(np.clip(base["dirty_air_penalty"] * (0.9 + 0.3 * float(dfi)), 0.03, 0.60))
     return base
 
+
 # ------------------- RNG seeding helpers (NEW) -------------------
 def _seed_mix32(*parts) -> int:
     """Stable 32-bit hash for seeding."""
@@ -740,9 +812,11 @@ def _seed_mix32(*parts) -> int:
         h.update(b"|")
     return int.from_bytes(h.digest(), "little") & 0xFFFFFFFF
 
+
 def _event_key_for_seed(cfg: dict) -> str:
     vt = _cfg_get(cfg, ["viz_track"], {}) or {}
-    return f"{vt.get('year','')}-{vt.get('grand_prix','')}".lower()
+    return f"{vt.get('year', '')}-{vt.get('grand_prix', '')}".lower()
+
 
 def _spawn_rng_streams(cfg: dict, global_seed: int, run_idx: int = 0):
     """
@@ -763,6 +837,7 @@ def _spawn_rng_streams(cfg: dict, global_seed: int, run_idx: int = 0):
     }
     return rngs, meta
 
+
 def _finish_order_entropy(start_order: List[int], finish_order: List[int]) -> float:
     """
     Normalized inversion ratio (0=no changes, 1=complete reversal).
@@ -778,24 +853,66 @@ def _finish_order_entropy(start_order: List[int], finish_order: List[int]) -> fl
     max_inv = n * (n - 1) // 2
     return (inv / max_inv) if max_inv > 0 else 0.0
 
+
+# ------------------- Optional learned overtake model loader -------------------
+class _OvertakeProxy:
+    """Thin adapter around outputs/traits/overtake_model.pkl if present; graceful fallback otherwise."""
+
+    def __init__(self):
+        self.model = None
+        try:
+            # Lazy import to avoid hard dep
+            from traits import load_overtake_bundle  # provided in traits.py
+            bundle = load_overtake_bundle()
+            if bundle and ("model" in bundle):
+                self.model = bundle["model"]
+        except Exception:
+            self.model = None
+
+    def available(self) -> bool:
+        return self.model is not None
+
+    def proba(self,
+              pace_gap: float,
+              drs_available: int,
+              corner_type: str,
+              straight_len: float,
+              attacker_trait: float,
+              defender_trait: float) -> float:
+        if not self.model:
+            return float("nan")
+        x = {
+            "pace_gap": float(pace_gap),
+            "DRS_available": int(drs_available),
+            "corner_type": str(corner_type or "straight"),
+            "straight_len": float(straight_len),
+            "attacker_trait": float(attacker_trait),
+            "defender_trait": float(defender_trait),
+        }
+        try:
+            return float(self.model.predict_proba(x))
+        except Exception:
+            return float("nan")
+
+
 # ------------------- Simulation -------------------
 def simulate_progress(
-    ranking: pd.DataFrame,
-    xy_path: np.ndarray,
-    base_lap: float,
-    n_laps: int,
-    dt: float,
-    noise_sd: float,
-    seed: int,
-    cfg: Optional[dict] = None,
-    meta: Optional[dict] = None,
-    weather_summary: Optional[dict] = None,
-    incident_rate: float = P_INCIDENT_PER_LAP_DEFAULT,   # NEW
-    start_gain_sd_override: Optional[float] = None,       # NEW
-    disable_dnfs: bool = False,                           # NEW
-    run_idx: int = 0,
+        ranking: pd.DataFrame,
+        xy_path: np.ndarray,
+        base_lap: float,
+        n_laps: int,
+        dt: float,
+        noise_sd: float,
+        seed: int,
+        cfg: Optional[dict] = None,
+        meta: Optional[dict] = None,
+        weather_summary: Optional[dict] = None,
+        incident_rate: float = P_INCIDENT_PER_LAP_DEFAULT,  # NEW
+        start_gain_sd_override: Optional[float] = None,  # NEW
+        disable_dnfs: bool = False,  # NEW
+        run_idx: int = 0,
+        deterministic_pass: bool = False,  # NEW: if True, pass iff p>=0.5 (or logit>=0)
 ):
-
     if cfg is None:
         cfg = {}
 
@@ -838,13 +955,17 @@ def simulate_progress(
 
     # Fallback to a generic straight if detection/metadata yields none
     if not zones:
-        zs = int(0.15 * P); ze = int(0.35 * P); zd = int(0.12 * P)
+        zs = int(0.15 * P);
+        ze = int(0.35 * P);
+        zd = int(0.12 * P)
         zones = [(zs, ze, zd)]
 
     det_eff = float(otk["drs_detect_thresh_s"])
 
     # Scale alpha by length of strongest DRS zone (existing) + count of zones (meta-aware)
-    def _seg_len(a, b): return (b - a + 1) if a <= b else (P - a) + (b + 1)
+    def _seg_len(a, b):
+        return (b - a + 1) if a <= b else (P - a) + (b + 1)
+
     longest = max((_seg_len(a, b) for (a, b, _) in zones), default=int(0.12 * P))
     frac = longest / float(P)
     baseline = 0.12
@@ -861,21 +982,24 @@ def simulate_progress(
         pers = {}
 
     agg = np.array([pers.get(d, {}).get("aggression", 0.5) for d in drivers], dtype=float)
-    defence = np.array([pers.get(d, {}).get("defence", 0.5)   for d in drivers], dtype=float)
-    risk = np.array([pers.get(d, {}).get("risk", 0.5)         for d in drivers], dtype=float)
+    defence = np.array([pers.get(d, {}).get("defence", 0.5) for d in drivers], dtype=float)
+    risk = np.array([pers.get(d, {}).get("risk", 0.5) for d in drivers], dtype=float)
 
-    agg_w  = float(_cfg_get(cfg, ["personality", "agg_weight"], 1.0))
-    def_w  = float(_cfg_get(cfg, ["personality", "def_weight"], 1.0))
+    agg_w = float(_cfg_get(cfg, ["personality", "agg_weight"], 1.0))
+    def_w = float(_cfg_get(cfg, ["personality", "def_weight"], 1.0))
 
-    # Base lap + driver deltas + jitter
+    # Optional learned overtake model
+    learned_otk = _OvertakeProxy()
+
+    # Base lap + driver deltas + jitter (noise_sd may be 0 in deterministic mode)
     base_driver = base_lap_eff + deltas + r_lap.normal(0.0, noise_sd, size=D)
 
     # Degradation matrix (compound & track-type aware; meta track_type preferred)
     tmul_fn = _temp_multiplier_fn(cfg, weather_summary)
     degrade = build_degradation_matrix(cfg, n_laps, drivers, r_lap, meta=meta, temp_mult_fn=tmul_fn)  # (L, D)
 
-    # Random lap noise
-    eps_lap = r_lap.normal(0.0, float(LAP_JITTER_SD), size=(n_laps, D))
+    # Random lap noise (may be all zeros when deterministic)
+    eps_lap = r_lap.normal(0.0, float(LAP_JITTER_SD if noise_sd > 0 else 0.0), size=(n_laps, D))
 
     # Lap time cube
     lap_times = base_driver[None, :] + degrade + eps_lap
@@ -906,13 +1030,15 @@ def simulate_progress(
         "attempts": 0,
         "passes": 0,
         "dnfs": [],
-        "start_gains_sec": None,       # filled after starts
-        "grid_order": None,            # indices 0..D-1
-        "finish_order": None,          # indices 0..D-1
-        "finish_entropy": None,        # normalized inversion ratio
+        "start_gains_sec": None,  # filled after starts
+        "grid_order": None,  # indices 0..D-1
+        "finish_order": None,  # indices 0..D-1
+        "finish_entropy": None,  # normalized inversion ratio
         "seed_meta": seed_meta,
         "timestamp": int(time.time()),
         "weather_summary": weather_summary or {},
+        "deterministic_mode": bool(
+            deterministic_pass and disable_dnfs and (noise_sd == 0.0) and (incident_rate == 0.0)),
     }
     # grid order: use actual baseline pace (lower -> ahead), not raw deltas
     grid_order = list(np.argsort(base_driver))
@@ -943,15 +1069,22 @@ def simulate_progress(
     else:
         scale_vec = np.ones(D, dtype=float)
 
+    # In deterministic mode, base_start_sd may be 0 so these are all zeros
     start_gain_sec = r_start.normal(0.0, base_start_sd, size=D) * scale_vec + bias
     stats["start_gains_sec"] = {drivers[i]: float(start_gain_sec[i]) for i in range(D)}
     start_gain_pts = start_gain_sec * L0_speed
     curr_pts = np.maximum(0.0, curr_pts + np.clip(start_gain_pts, -P * 0.02, P * 0.02))
 
-    positions_list = []; lapkey_list = []; leaderlap_list = []
-    phase_flags = []; rc_texts = []; drs_on_flags = []; drs_banner = []
+    positions_list = [];
+    lapkey_list = [];
+    leaderlap_list = []
+    phase_flags = [];
+    rc_texts = [];
+    drs_on_flags = [];
+    drs_banner = []
     event_log: List[Tuple[float, str]] = []
-    orders = []; gaps_panel = []
+    orders = [];
+    gaps_panel = []
 
     def _gap_seconds(i_follow: int, i_lead: int) -> float:
         if curr_lap[i_follow] != curr_lap[i_lead]:
@@ -963,8 +1096,10 @@ def simulate_progress(
         return float(dp / max(v, 1e-6))
 
     def _in_range(prev: float, now: float, target: int) -> bool:
-        if now >= prev: return (prev <= target) and (target < now)
-        else:           return (target >= prev) or (target < now)
+        if now >= prev:
+            return (prev <= target) and (target < now)
+        else:
+            return (target >= prev) or (target < now)
 
     def _apply_defense(i_lead: int):
         L = min(curr_lap[i_lead], n_laps - 1)
@@ -989,10 +1124,30 @@ def simulate_progress(
         def_mult = 1.0 + 0.8 * def_w * (defence[i_lead] - 0.5) if use_personality else 1.0
 
         dirty = float(otk["dirty_air_penalty"])
-        logit = (alpha_eff * att_mult) * delta_norm + float(otk["beta_drs"]) * slip - (float(otk["gamma_defend"]) * def_mult) * defended - dirty
-        p = 1.0 / (1.0 + math.exp(-logit))
+
+        # If learned model exists, use it; else internal logistic
+        p = float("nan")
+        if learned_otk.available():
+            # Rough features to feed learned model
+            straight_len = _seg_len(*[(zs, ze) for (zs, ze, _zd) in [(zones[0][0], zones[0][1])]][0]) / float(P)
+            p = learned_otk.proba(
+                pace_gap=float(pace_lead - pace_foll),
+                drs_available=1,
+                corner_type="straight",
+                straight_len=float(straight_len),
+                attacker_trait=float(agg[i_follow]),
+                defender_trait=float(defence[i_lead]),
+            )
+        if not np.isfinite(p):
+            # fallback: calibrated internal logit
+            logit = (alpha_eff * att_mult) * delta_norm + float(otk["beta_drs"]) * slip - (
+                        float(otk["gamma_defend"]) * def_mult) * defended - dirty
+            p = 1.0 / (1.0 + math.exp(-logit))
+
         stats["attempts"] += 1
-        if np.isfinite(p) and (r_pass.random() < p):
+        # Deterministic: pass iff p >= 0.5
+        will_pass = (p >= 0.5) if deterministic_pass else (r_pass.random() < p)
+        if will_pass:
             car_len = max(1, int(P * 0.0025))
             curr_pts[i_follow] = (curr_pts[i_lead] + car_len) % P
             curr_pts[i_lead] = (curr_pts[i_lead] - car_len) % P
@@ -1037,18 +1192,20 @@ def simulate_progress(
 
         leader_completed = int(curr_lap.max() if curr_lap.size else 0)
 
-        # Incidents -> SC/VSC
+        # Incidents -> SC/VSC (disabled when incident_rate==0)
         if phase == "GREEN" and leader_completed > 0 and r_inc.random() < float(incident_rate):
             if r_inc.random() < SC_SHARE:
                 phase = "SC"
                 sc_laps_remaining = r_inc.integers(SC_DURATION_LAPS_MINMAX[0], SC_DURATION_LAPS_MINMAX[1] + 1)
                 order = np.argsort(-(curr_lap.astype(float) + (curr_pts / P)))
-                lead = order[0]; base_pos = curr_pts[lead]
+                lead = order[0];
+                base_pos = curr_pts[lead]
                 for rank, di in enumerate(order):
                     gap_pts = int(SC_STAGGER_GAP_FRAC * P * rank)
                     pos = base_pos - gap_pts
                     while pos < 0: pos += P
-                    curr_pts[di] = pos; curr_lap[di] = curr_lap[lead]
+                    curr_pts[di] = pos;
+                    curr_lap[di] = curr_lap[lead]
                 for z in drs_eligible.values(): z.clear()
                 defended_this_lap[:] = False
                 drs_disabled_until_lap = leader_completed + 1 + DRS_COOLDOWN_AFTER_SC_LAPS
@@ -1081,7 +1238,8 @@ def simulate_progress(
             # simple blocking outside zones
             BLOCKING_THRESH_S = 0.8
             for k in range(1, len(order)):
-                i_lead = order[k - 1]; i_foll = order[k]
+                i_lead = order[k - 1];
+                i_foll = order[k]
                 if curr_lap[i_lead] >= n_laps or curr_lap[i_foll] >= n_laps:
                     continue
                 in_any_zone = any(((zs <= curr_pts[i_foll] <= ze) if zs <= ze
@@ -1092,10 +1250,12 @@ def simulate_progress(
                     # personality-aware defend prob
                     if use_personality:
                         base_defend = 0.55
-                        P_DEFEND = float(np.clip(base_defend * (1.0 + 0.6 * def_w * (defence[i_lead] - 0.5)), 0.20, 0.95))
+                        P_DEFEND = float(
+                            np.clip(base_defend * (1.0 + 0.6 * def_w * (defence[i_lead] - 0.5)), 0.20, 0.95))
                     else:
                         P_DEFEND = 0.55
-                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (r_pass.random() < P_DEFEND):
+                    if (gap_s <= BLOCKING_THRESH_S) and (not defended_this_lap[i_lead]) and (
+                            r_pass.random() < P_DEFEND):
                         _apply_defense(i_lead)
                         _log(f"DEFENSE: {drivers[i_lead]} blocks {drivers[i_foll]} (+0.06s)", sim_time)
 
@@ -1205,12 +1365,14 @@ def build_animation(
     phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
     dt: float,
     weather_summary: Optional[dict] = None,
+    deterministic_mode: bool = False,
 ) -> go.Figure:
     T, D, _ = positions.shape
     labels = [str(dr).upper()[:3] for dr in drivers]
     names = [name_map.get(dr, dr) for dr in drivers]
     colors = [color_map.get(dr, "#888888") for dr in drivers]
 
+    title_mode = "Deterministic Equal-Car Mode" if deterministic_mode else "Equal-Car Replay"
     fig = make_subplots(
         rows=2, cols=2,
         specs=[[{"type": "xy", "rowspan": 2}, {"type": "table"}],
@@ -1219,7 +1381,7 @@ def build_animation(
         row_heights=[0.72, 0.28],
         horizontal_spacing=0.05,
         vertical_spacing=0.08,
-        subplot_titles=("Equal-Car Replay", "Leaderboard (live)", "Race Control"),
+        subplot_titles=(title_mode, "Leaderboard (live)", "Race Control"),
     )
 
     track_col0 = _track_color(phase_flags[0] if len(phase_flags) else "GREEN")
@@ -1291,7 +1453,7 @@ def build_animation(
     fig.update_yaxes(showticklabels=False, row=2, col=2)
 
     def _btn(speed: float, label: str):
-        frame_ms = max(5, int(1000 * dt / speed))  # use chosen dt, not global DT
+        frame_ms = max(5, int(1000 * dt / speed))
         return dict(label=label, method="animate",
                     args=[None, {"fromcurrent": True,
                                  "frame": {"duration": frame_ms, "redraw": True},
@@ -1307,12 +1469,13 @@ def build_animation(
     initial_lap_disp = int(np.clip(leader_lap[0] if len(leader_lap) else 1, 1, n_laps))
     wx_text = _fmt_weather_overlay(weather_summary)
 
+    subtitle = "Deterministic Equal-Car Mode" if deterministic_mode else "Stochastic Mode"
     fig.update_layout(
         height=920,
         margin=dict(l=16, r=16, t=168, b=20),
         legend=dict(title="Drivers", x=0.01, y=0.98, bgcolor="rgba(255,255,255,0.6)"),
         updatemenus=[dict(type="buttons", showactive=False, x=0.48, y=1.20, xanchor="center", buttons=buttons)],
-        title=f"Equal-Car Replay  •  DRSα={alpha_eff:.2f}  det≈{det_eff:.2f}s",
+        title=f"Equal-Car Replay • {subtitle}  •  DRSα={alpha_eff:.2f}  det≈{det_eff:.2f}s",
         annotations=[
             dict(text=f"Lap {initial_lap_disp} / {n_laps}", showarrow=False, x=0.21, y=1.21, xref="paper", yref="paper",
                  font=dict(size=14, color="#1f2d3d")),
@@ -1430,8 +1593,11 @@ def main():
     cfg = load_config("config/config.yaml")
     if "cache_dir" in cfg: enable_cache(cfg["cache_dir"])
 
-    # Read high-level sim knobs if present
+    # High-level sim knobs
     vizsec = _cfg_get(cfg, ["visualize_equal_race"], {}) or {}
+    simsec = _cfg_get(cfg, ["simulation"], {}) or {}
+    add_noise = bool(simsec.get("add_noise", True))  # <- key flag for deterministic mode
+
     use_evt = bool(_cfg_get(vizsec, ["use_event_specific_deltas"], USE_EVENT_SPECIFIC_DELTAS))
     gp_sub = str(_cfg_get(vizsec, ["target_gp_substr"], TARGET_GP_SUBSTR)) or TARGET_GP_SUBSTR
 
@@ -1439,15 +1605,14 @@ def main():
     base_lap = float(_cfg_get(vizsec, ["base_lap_sec"], BASE_LAP_SEC))
     n_laps = int(_cfg_get(vizsec, ["n_laps"], N_LAPS))
     dt = float(_cfg_get(vizsec, ["dt"], DT))
-    noise_sd = float(_cfg_get(vizsec, ["lap_jitter_sd"], LAP_JITTER_SD))
+    noise_sd_cfg = float(_cfg_get(vizsec, ["lap_jitter_sd"], LAP_JITTER_SD))
 
     # Seeds & run index for determinism/diversity
     seed = int(_cfg_get(vizsec, ["seed"], RANDOM_SEED))
     run_idx = int(_cfg_get(vizsec, ["run_idx"], 0))
 
-    # Track metadata (optional)
+    # Track metadata & weather
     meta = _load_viz_track_meta(cfg)
-    # Weather summary (preferred from event["weather_summary"]; fallback to laps medians)
     weather_summary = _load_weather_summary_for_viz(cfg)
 
     # Deltas: event-specific or global
@@ -1466,18 +1631,36 @@ def main():
         name_map.setdefault(dr, dr); team_map.setdefault(dr, "UNKNOWN"); num_map.setdefault(dr, 999)
     color_map = assign_colors(ranking["driver"].tolist(), team_map, num_map)
 
+    # Deterministic-mode wiring (no jitter, no DNFs/SCs, deterministic passes, static starts)
+    if not add_noise:
+        noise_sd = 0.0
+        incident_rate = 0.0
+        disable_dnfs = True
+        deterministic_pass = True
+        start_gain_sd_override = 0.0
+        print("[INFO] Deterministic Equal-Car Mode: noise off, DNFs off, SC/VSC off, passes deterministic.")
+    else:
+        noise_sd = noise_sd_cfg
+        incident_rate = P_INCIDENT_PER_LAP_DEFAULT
+        disable_dnfs = False
+        deterministic_pass = False
+        start_gain_sd_override = None
+
     (positions, lap_key, leader_lap, drivers,
      phase_flags, rc_texts, drs_on, drs_banner,
      orders, gaps_panel, zones, alpha_eff, det_eff, stats) = simulate_progress(
         ranking, xy, base_lap=base_lap, n_laps=n_laps, dt=dt,
-        noise_sd=noise_sd, seed=seed, cfg=cfg, meta=meta, weather_summary=weather_summary, run_idx=run_idx
+        noise_sd=noise_sd, seed=seed, cfg=cfg, meta=meta, weather_summary=weather_summary,
+        incident_rate=incident_rate, start_gain_sd_override=start_gain_sd_override,
+        disable_dnfs=disable_dnfs, run_idx=run_idx, deterministic_pass=deterministic_pass
     )
 
     fig = build_animation(
         positions, lap_key, leader_lap, drivers, name_map, color_map, xy, n_laps,
         phase_flags, rc_texts, drs_on, drs_banner, orders, gaps_panel, zones, alpha_eff, det_eff,
         dt=dt,
-        weather_summary=weather_summary
+        weather_summary=weather_summary,
+        deterministic_mode=stats.get("deterministic_mode", False)
     )
 
     out_path = OUT_DIR / "simulation.html"
