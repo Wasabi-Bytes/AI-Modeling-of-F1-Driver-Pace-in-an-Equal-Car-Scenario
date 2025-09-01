@@ -11,7 +11,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-# Statsmodels for FE/splines + robust SEs
+# Statsmodels for FE/splines + robust SEs + MixedLM
 import statsmodels.formula.api as smf
 from patsy import bs
 
@@ -166,7 +166,7 @@ def _attach_event_track_tags(df: Optional[pd.DataFrame], event: Dict[str, Any], 
     if row.empty:
         row = tm.loc[ekeys.apply(lambda k: (k in gp) or (gp in k))]
 
-    # 2) Heuristic mapping from GP name to CSV key (handles Monza/Silverstone/etc.)
+    # 2) Heuristic mapping from GP name to CSV key
     if row.empty:
         gp_map = {
             "british": "silverstone",
@@ -248,7 +248,6 @@ def _attach_event_track_tags(df: Optional[pd.DataFrame], event: Dict[str, Any], 
             if c not in d2.columns:
                 d2[c] = r0.get(c)
             else:
-                # fill only missing values if the column already exists
                 d2[c] = d2[c].where(d2[c].notna(), r0.get(c))
     return d2
 
@@ -401,10 +400,7 @@ def _empirical_bayes_shrinkage_smart(
 
 
 def _empirical_bayes_shrinkage(delta: pd.Series, se: pd.Series):
-    """
-    Back-compat shim used by older call sites: delegate to the smart EB
-    with defaults (field mean target, no team RE).
-    """
+    """Back-compat shim."""
     shrunk, w, _ = _empirical_bayes_shrinkage_smart(delta, se, team=None, cfg={})
     return shrunk, w
 
@@ -690,6 +686,130 @@ def race_metrics_ols_team(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
 
 
 # ============================================================
+# ========== OPTION C: CROSS-CLASSIFIED MIXED MODEL ==========
+# ============================================================
+def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
+    """
+    Cross-classified mixed model (recommended):
+        LapTime ~ tyre/age/lap (+ optional temp & track controls)
+               + u_driver + u_team + u_event  (random intercepts)
+    Implementation detail:
+      - Grouping RE: driver (so we can extract per-driver BLUP easily)
+      - Variance components (vc): team and event (crossed with driver)
+      - Fit via REML. If optimizer fails, we retry with different methods then fall back to OLS.
+    Returns per-(driver, team) summary with:
+      race_delta_s: driver random intercept (BLUP, seconds; <0 faster)
+      race_se_s   : approx SE via driver-level residual SEM (conservative)
+      race_n      : laps used for that driver's team pairing in this event sample
+      race_model  : "mixed_cc(reml[+temp][+track])"
+    """
+    d = _prep_race_columns(race_df)
+    if d.empty:
+        return pd.DataFrame(columns=["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"])
+
+    df_age = int(cfg.get("race_spline_df_tyre_age", 4))
+    df_lap = int(cfg.get("race_spline_df_lap_num", 4))
+    d = d.copy()
+    d["lap_time_s"] = d["LapTimeSeconds"].astype(float)
+
+    # Base fixed effects (no team/driver/event FE here; those go to RE)
+    base = (
+        f"lap_time_s ~ C(compound)"
+        f" + bs(lap_on_tyre, df={df_age}, include_intercept=False)"
+        f" + bs(lap_number, df={df_lap}, include_intercept=False)"
+    )
+
+    # Temperature spline (optional)
+    df_temp_cfg = int(cfg.get("race_spline_df_track_temp", 3))
+    use_temp_comp = bool(cfg.get("race_use_temp_compound_interaction", False))
+    nuniq_temp = d["track_temp_c_filled"].nunique(dropna=True) if "track_temp_c_filled" in d.columns else 0
+    df_temp_use = max(1, min(df_temp_cfg, max(1, nuniq_temp - 1)))
+    used_temp = False
+    if (df_temp_use > 0) and (nuniq_temp >= 4) and ("track_temp_c_filled" in d.columns) and d["track_temp_c_filled"].notna().any():
+        base += f" + bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
+        if use_temp_comp:
+            base += f" + C(compound):bs(track_temp_c_filled, df={df_temp_use}, include_intercept=False)"
+        used_temp = True
+
+    # Optional track controls as fixed effects (archetype/continuous)
+    formula = _append_track_controls_to_formula(base, d, cfg)
+    used_track = (formula != base)
+
+    # --- MixedLM specification ---
+    # Group random intercept on driver; crossed variance components for team & event.
+    # This gives us per-driver BLUPs while accounting for team/event heterogeneity.
+    vc = {
+        "team_vc": "0 + C(team)",
+        "event_vc": "0 + C(event)",
+    }
+    # If you want to try a coarse "track" vc later, you can add: "track_vc": "0 + C(track_type)" when present.
+
+    # Fit with REML, try a couple of optimizers
+    def _fit_mixed(method: str):
+        return smf.mixedlm(
+            formula,
+            data=d,
+            groups=d["driver"],     # random intercept per driver
+            re_formula="1",
+            vc_formula=vc
+        ).fit(reml=True, method=method, disp=False)
+
+    result = None
+    tried = []
+    for m in ["lbfgs", "powell", "bfgs", "cg"]:
+        try:
+            result = _fit_mixed(m)
+            tried.append(m)
+            if result.converged:
+                break
+        except Exception as e:
+            tried.append(f"{m}:fail")
+            continue
+
+    if (result is None) or (not getattr(result, "converged", False)):
+        logger.warning("[mixed_cc] MixedLM did not converge (tried=%s); falling back to OLS team model.", ",".join(tried))
+        return race_metrics_ols_team(d, cfg)
+
+    # ------------ Extract driver BLUPs ------------
+    # random_effects: dict keyed by driver -> array([u_driver_intercept])
+    re = result.random_effects
+    # BLUP sign: model adds +u_driver to LapTime; negative => faster
+    drv_blup = pd.Series({k: float(np.ravel(v)[0]) for k, v in re.items()}, name="u_driver")
+
+    # Laps per driver×team for a reasonable "exposure" count
+    grp = d.groupby(["driver", "team"], dropna=False)
+    n_by_dt = grp.size().rename("race_n")
+
+    # Approx driver-level SE: residual SEM by driver (conservative, since vc RE SE per-level not directly exposed)
+    resid = result.resid
+    d_res = d.assign(__resid__=resid)
+    sem_by_driver = d_res.groupby("driver")["__resid__"].std(ddof=1) / np.sqrt(
+        d_res.groupby("driver")["__resid__"].size().clip(lower=1)
+    )
+    sem_by_driver = sem_by_driver.rename("race_se_s")
+
+    # Assemble output over driver×team (so downstream stays consistent)
+    out = (
+        n_by_dt.reset_index()
+        .merge(drv_blup.rename("race_delta_s").reset_index().rename(columns={"index": "driver"}), on="driver", how="left")
+        .merge(sem_by_driver.reset_index(), on="driver", how="left")
+    )
+
+    # Model label
+    flags = []
+    if used_temp:
+        flags.append("temp")
+    if used_track:
+        flags.append("track")
+    suffix = ("," + "+".join(flags)) if flags else ""
+    out["race_model"] = f"mixed_cc(reml{suffix})"
+
+    # Sort: faster (more negative) first
+    out = out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
+    return out
+
+
+# ============================================================
 # ================= QUALIFYING (EVOLUTION-AWARE) =============
 # ============================================================
 def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series:
@@ -943,8 +1063,11 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
     if dQ_clean is not None:
         dQ_clean = _attach_event_track_tags(dQ_clean, event, cfg)
 
+    # --------- Choose model ----------
     model_choice = str(cfg.get("race_model", "ols_team")).lower()
-    if model_choice in ("ols_team", "ridge_team"):
+    if model_choice in ("mixed_cc", "mixed", "mixedlm"):
+        race_out = race_metrics_mixed_cc(dR_clean, cfg)
+    elif model_choice in ("ols_team", "ridge_team"):
         race_out = race_metrics_ols_team(dR_clean, cfg)
     elif model_choice in ("corrections_team", "corrections"):
         race_out = race_metrics_corrections_team(dR_clean, cfg)
@@ -1009,14 +1132,12 @@ def compute_event_metrics(event: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[st
                     merged[out_col] = shrunk
                     merged[w_col] = w
                     merged[extra_col] = post_sd
-                    # (Optionally stash meta_hb['tau_team2'], meta_hb['tau_driver2'] if you want)
                 else:
                     shrunk, w, tau2 = _empirical_bayes_shrinkage_smart(
                         merged[col_delta], merged[col_se], merged.get("team"), cfg
                     )
                     merged[out_col] = shrunk
                     merged[w_col] = w
-                    # Keep EB's hyperparameter for reference; no post_sd for EB
                     tau_name = out_col.replace("_delta_s_shrunk", "") + "_tau2"
                     merged[tau_name] = float(tau2)
 
