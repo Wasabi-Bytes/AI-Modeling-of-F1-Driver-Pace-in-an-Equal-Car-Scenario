@@ -1,5 +1,5 @@
 
-# Equal-Car F1 Driver Pace Modeling
+# EqualGrid F1 2025 Simulation
 
 **What if every F1 driver raced the same car?**
 This project estimates each driver’s **underlying pace** (independent of constructor) and replays an **equal-car race** in two modes:
