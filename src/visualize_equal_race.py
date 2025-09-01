@@ -1624,7 +1624,39 @@ def main():
     else:
         ranking = load_driver_ranking_global(cfg)
 
+    # Deltas: event-specific or global
+    if use_evt:
+        ranking = load_driver_ranking_event(cfg, gp_sub.lower())
+        if ranking is None or ranking.empty:
+            print("[WARN] Could not load per-event deltas; falling back to global aggregates.")
+            ranking = load_driver_ranking_global(cfg)
+    else:
+        ranking = load_driver_ranking_global(cfg)
+
+    # === Exclude drivers (e.g., remove "DOO") ==============================
+    # Source 1: config -> simulation.exclude_drivers: ["DOO", ...]
+    cfg_exclude = _cfg_get(cfg, ["simulation", "exclude_drivers"], []) or []
+    exclude = set(str(x) for x in cfg_exclude)
+
+    # (Optional) hardcode one-off removals here; delete this line if you
+    # prefer to manage entirely via the config list above:
+    # exclude.update({"DOO"})
+
+    if not ranking.empty and exclude:
+        before = len(ranking)
+        ranking = ranking[~ranking["driver"].astype(str).isin(exclude)].reset_index(drop=True)
+        after = len(ranking)
+        if before != after:
+            print(f"[INFO] Excluded drivers: {sorted(exclude)} (kept {after}/{before})")
+        if ranking.empty:
+            raise RuntimeError("All drivers were excluded; nothing to simulate.")
+    # ======================================================================
+
     xy = load_track_outline(cfg)
+
+
+    xy = load_track_outline(cfg)
+
 
     team_map, name_map, num_map = _get_driver_team_map_from_recent()
     for dr in ranking["driver"].tolist():

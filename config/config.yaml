@@ -220,6 +220,7 @@ simulation:
   overtake_model: "deterministic"
   entropy_guard:
     min_unique_orders: 0.60
+  exclude_drivers: [ "DOO" ]
 
 # ===== Paths to calibration artifacts =====
 paths:
