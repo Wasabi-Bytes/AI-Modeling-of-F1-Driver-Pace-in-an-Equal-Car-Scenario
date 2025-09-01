@@ -214,3 +214,14 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+cat >> .gitignore <<'EOF'
+# IDE + caches + large artifacts
+.idea/
+fastf1_cache/
+*.ff1pkl
+*.npz
+*.parquet
+*.csv.gz
+*.zip
+EOF
