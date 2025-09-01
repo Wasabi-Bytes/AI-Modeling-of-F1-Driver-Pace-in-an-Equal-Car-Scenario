@@ -21,8 +21,9 @@ for name in ["fastf1", "fastf1.core", "fastf1.api", "fastf1.mvapi"]:
     logging.getLogger(name).propagate = False
 
 
-
-# -------- Paths & Config --------
+# -----------------------------------------------------------------------------
+# Paths & Config
+# -----------------------------------------------------------------------------
 def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -35,14 +36,18 @@ def load_config(config_path: str = "config/config.yaml") -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-# -------- FastF1 Cache --------
+# -----------------------------------------------------------------------------
+# FastF1 Cache
+# -----------------------------------------------------------------------------
 def enable_cache(cache_dir: str) -> None:
     cache_dir_abs = (_project_root() / cache_dir).resolve()
     cache_dir_abs.mkdir(parents=True, exist_ok=True)
     fastf1.Cache.enable_cache(str(cache_dir_abs))
 
 
-# ====================== NEW: Weather & summaries helpers ======================
+# -----------------------------------------------------------------------------
+# Weather helpers
+# -----------------------------------------------------------------------------
 def _ensure_weather_cols(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     for c in ("ambient_temp_c", "track_temp_c"):
@@ -65,12 +70,11 @@ def _summarize_event_weather(df: pd.DataFrame) -> Dict[str, Any]:
             out[f"pct_nonan_{c}"] = 0.0
     return out
 
-# ============================================================================
 
-
-# -------- Fallback recent events (kept for backwards-compat) --------
+# -----------------------------------------------------------------------------
+# Fallback recent events (legacy)
+# -----------------------------------------------------------------------------
 def get_recent_races(_: Dict[str, Any]) -> List[Dict[str, Any]]:
-    # Legacy path used only if no season config is provided.
     return [
         {"year": 2025, "grand_prix": "Hungarian Grand Prix", "session": "R"},
         {"year": 2025, "grand_prix": "Belgian Grand Prix",   "session": "R"},
@@ -80,10 +84,12 @@ def get_recent_races(_: Dict[str, Any]) -> List[Dict[str, Any]]:
     ]
 
 
-# -------- Season enumeration (NEW) --------
+# -----------------------------------------------------------------------------
+# Season enumeration
+# -----------------------------------------------------------------------------
 def enumerate_season_rounds(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Return a list of dicts: [{'year': YEAR, 'round': int, 'event_name': str}, ...]
+    Return [{'year': int, 'round': int, 'event_name': str}, ...]
     Reads season.year and season.include_sprint from config if present.
     Defaults: year=2025, include_sprint=True.
     """
@@ -91,16 +97,13 @@ def enumerate_season_rounds(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     year = int(season_cfg.get("year", 2025))
     include_sprint = bool(season_cfg.get("include_sprint", True))
 
-    # Get the year's event schedule (no testing)
     sched = fastf1.get_event_schedule(year, include_testing=False)
 
-    # Which weekend formats to include
     if include_sprint:
         mask = sched["EventFormat"].isin(["conventional", "sprint"])
     else:
         mask = sched["EventFormat"].isin(["conventional"])
 
-    # Keep rows with a round number; sort by round
     keep = sched.loc[mask & sched["RoundNumber"].notna()].copy()
     keep["RoundNumber"] = keep["RoundNumber"].astype(int)
     keep = keep.sort_values("RoundNumber")
@@ -118,7 +121,9 @@ def enumerate_season_rounds(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return events
 
 
-# -------- Small helpers --------
+# -----------------------------------------------------------------------------
+# Small helpers
+# -----------------------------------------------------------------------------
 def _to_secs(x) -> float:
     try:
         return float(getattr(x, "total_seconds", lambda: float(x))())
@@ -148,10 +153,19 @@ def _is_green(track_status: pd.Series) -> pd.Series:
     return s == "1"
 
 
+def _is_wet_compound(series: pd.Series) -> pd.Series:
+    """Identify wet/intermediate compounds (case-insensitive)."""
+    names = series.astype(str).str.upper()
+    return names.isin({"INTERMEDIATE", "WET", "FULL WET", "EXTREME WET"})
+
+
+# -----------------------------------------------------------------------------
+# Core tagging (no outlier logic here)
+# -----------------------------------------------------------------------------
 def _derive_and_filter_tags(laps: pd.DataFrame, *, session_kind: str) -> Tuple[pd.DataFrame, Dict[str, int]]:
     """
-    Derive standardized tags and apply the strict pace-lap filter (lap_ok) immediately.
-    session_kind: 'R' or 'Q' (affects only logging text; logic identical).
+    Derive standardized tags and apply the strict base pace-lap filter (lap_ok).
+    Base filter = green, accurate, non-pit, valid time. (Dry filtering & outliers come later.)
     """
     d = _standardize_lap_seconds(laps).reset_index(drop=True)
 
@@ -197,8 +211,8 @@ def _derive_and_filter_tags(laps: pd.DataFrame, *, session_kind: str) -> Tuple[p
     # Valid time
     has_time = d["LapTimeSeconds"].notna() & (d["LapTimeSeconds"] > 0)
 
-    # Strict pace-lap flag
-    d["lap_ok"] = has_time & is_accurate & (~is_outlap) & (~is_inlap) & is_green
+    # Strict base flag (weather/dry & outliers applied later)
+    d["lap_ok_base"] = has_time & is_accurate & (~is_outlap) & (~is_inlap) & is_green
 
     # Stint inference
     if "Stint" in d.columns:
@@ -219,42 +233,35 @@ def _derive_and_filter_tags(laps: pd.DataFrame, *, session_kind: str) -> Tuple[p
 
     qa_counts = {
         "total_rows": int(len(d)),
-        "dropped_non_green": int((~is_green).sum()),
-        "dropped_inlap": int(is_inlap.sum()),
-        "dropped_outlap": int(is_outlap.sum()),
-        "dropped_inaccurate": int((~is_accurate).sum()),
-        "dropped_invalid_time": int((~has_time).sum()),
-        "dropped_total": int((~d["lap_ok"]).sum()),
-        "kept_total": int(d["lap_ok"].sum()),
+        "base_dropped_non_green": int((~is_green).sum()),
+        "base_dropped_inlap": int(is_inlap.sum()),
+        "base_dropped_outlap": int(is_outlap.sum()),
+        "base_dropped_inaccurate": int((~is_accurate).sum()),
+        "base_dropped_invalid_time": int((~has_time).sum()),
     }
 
+    # Keep only base-ok laps; weather & outliers handled in clean_laps()
     before = len(d)
-    d = d.loc[d["lap_ok"]].reset_index(drop=True)
+    d = d.loc[d["lap_ok_base"]].reset_index(drop=True)
     kept = len(d)
     dropped = before - kept
 
     logging.info(
-        f"[load_data] {session_kind}: kept {kept}/{before} pace laps "
-        f"({dropped} dropped). Reasons (non-exclusive): "
-        f"invalid_time={qa_counts['dropped_invalid_time']}, "
-        f"inaccurate={qa_counts['dropped_inaccurate']}, "
-        f"inlap={qa_counts['dropped_inlap']}, outlap={qa_counts['dropped_outlap']}, "
-        f"non_green={qa_counts['dropped_non_green']}."
+        f"[load_data] {session_kind}: base kept {kept}/{before} pace laps "
+        f"({dropped} dropped on base rules). Non-exclusive reasons: "
+        f"invalid_time={qa_counts['base_dropped_invalid_time']}, "
+        f"inaccurate={qa_counts['base_dropped_inaccurate']}, "
+        f"inlap={qa_counts['base_dropped_inlap']}, outlap={qa_counts['base_dropped_outlap']}, "
+        f"non_green={qa_counts['base_dropped_non_green']}."
     )
-
-    try:
-        kept_by = d.groupby(["Team", "driver"], dropna=False).size().sort_values(ascending=False).head(10)
-        logging.info(f"[load_data] {session_kind}: top-kept Team×Driver (first 10):\n{kept_by}")
-    except Exception:
-        pass
 
     needed = [
         "LapTimeSeconds", "driver", "Team", "compound",
-        "stint_id", "lap_on_tyre", "lap_number", "track_status", "lap_ok"
+        "stint_id", "lap_on_tyre", "lap_number", "track_status", "lap_ok_base"
     ]
     for c in needed:
         if c not in d.columns:
-            d[c] = np.nan if c != "lap_ok" else True
+            d[c] = np.nan if c != "lap_ok_base" else True
 
     return d, qa_counts
 
@@ -298,12 +305,15 @@ def _tag_stints_no_filter(laps: pd.DataFrame) -> pd.DataFrame:
     return d
 
 
+# -----------------------------------------------------------------------------
+# Interaction table (for viz/traits)
+# -----------------------------------------------------------------------------
 def _build_interaction_table(
     laps_raw: pd.DataFrame,
     ses: Any,
     *,
     session_kind: str,
-    merge_tolerance_seconds: int = 120,   # <-- NEW: config-driven tolerance
+    merge_tolerance_seconds: int = 120,
 ) -> pd.DataFrame:
     if laps_raw is None or len(laps_raw) == 0:
         return pd.DataFrame()
@@ -362,14 +372,13 @@ def _build_interaction_table(
                         dd, wx2,
                         left_on="__ref_time__", right_on="__wx_time__",
                         direction="nearest",
-                        tolerance=pd.Timedelta(f"{merge_tolerance_seconds}s")  # <-- NEW: config tolerance
+                        tolerance=pd.Timedelta(f"{merge_tolerance_seconds}s")
                     )
                     d["ambient_temp_c"] = merged["ambient_temp_c"].values
                     d["track_temp_c"] = merged["track_temp_c"].values
     except Exception:
         pass
 
-    # Guarantee presence even if merge failed (NEW)
     d = _ensure_weather_cols(d)
 
     d["gap_ahead_s"] = np.nan
@@ -393,6 +402,109 @@ def _build_interaction_table(
     return out.reset_index(drop=True)
 
 
+# -----------------------------------------------------------------------------
+# Deterministic cleaner (NEW): dry-only + outliers + report
+# -----------------------------------------------------------------------------
+def _drop_outliers(
+    d: pd.DataFrame,
+    method: str = "iqr",
+    iqr_k: float = 1.5,
+    z_k: float = 3.0
+) -> Tuple[pd.DataFrame, int]:
+    """Deterministic outlier removal on LapTimeSeconds (per-driver or global)."""
+    if d.empty:
+        return d, 0
+    x = pd.to_numeric(d["LapTimeSeconds"], errors="coerce")
+    mask = pd.Series(False, index=d.index)
+
+    # Per-driver IQR to avoid mixing stints/compounds too much
+    if method.lower() == "iqr":
+        def iqr_mask(s: pd.Series) -> pd.Series:
+            q1 = s.quantile(0.25)
+            q3 = s.quantile(0.75)
+            iqr = q3 - q1
+            lo = q1 - iqr_k * iqr
+            hi = q3 + iqr_k * iqr
+            return (s < lo) | (s > hi)
+
+        m = d.groupby("driver", group_keys=False)["LapTimeSeconds"].apply(iqr_mask)
+        mask = mask | m.reindex(d.index, fill_value=False)
+
+    elif method.lower() in ("z", "zscore"):
+        mu = x.mean()
+        sd = x.std(ddof=0)
+        if sd == 0 or np.isnan(sd):
+            mask = mask  # nothing to drop
+        else:
+            z = (x - mu) / sd
+            mask = mask | (z.abs() > z_k)
+
+    dropped = int(mask.sum())
+    out = d.loc[~mask].reset_index(drop=True)
+    return out, dropped
+
+
+def clean_laps(
+    d_base: pd.DataFrame,
+    cfg: Dict[str, Any],
+    *,
+    session_kind: str
+) -> Tuple[pd.DataFrame, Dict[str, int]]:
+    """
+    Primary deterministic cleaner used across the repo.
+    Steps:
+      1) Apply base strict filter (green, accurate, non-pit, valid time).
+      2) Dry-only (drop wet/intermediate compounds) if enabled.
+      3) Optional outlier removal (IQR or Z-score).
+      4) Return cleaned df and a rejection report.
+    """
+    # 1) Base filter/tagging
+    d, base_counts = _derive_and_filter_tags(d_base, session_kind=session_kind)
+
+    # 2) Dry-only
+    filt_cfg = (cfg.get("filters") or {})
+    dry_only = bool(filt_cfg.get("dry_only", True))
+    if dry_only and "compound" in d.columns:
+        wet_mask = _is_wet_compound(d["compound"])
+        dropped_wet = int(wet_mask.sum())
+        d = d.loc[~wet_mask].reset_index(drop=True)
+    else:
+        dropped_wet = 0
+
+    # 3) Outliers
+    drop_outliers = bool(filt_cfg.get("drop_outliers", True))
+    out_method = str(filt_cfg.get("outlier_method", "iqr"))
+    iqr_k = float(filt_cfg.get("iqr_k", 1.5))
+    z_k = float(filt_cfg.get("z_k", 3.0))
+    if drop_outliers:
+        d, dropped_outliers = _drop_outliers(d, method=out_method, iqr_k=iqr_k, z_k=z_k)
+    else:
+        dropped_outliers = 0
+
+    # Final flag
+    d["lap_ok"] = True  # By construction after deterministic cleaning
+
+    # Rejection report
+    report: Dict[str, int] = {
+        **base_counts,
+        "dropped_wet": dropped_wet,
+        "dropped_outliers": dropped_outliers,
+        "kept_total": int(len(d)),
+    }
+
+    logging.info(
+        f"[clean_laps] {session_kind}: dry_only={dry_only}, outliers={drop_outliers} "
+        f"(method={out_method}, iqr_k={iqr_k}, z_k={z_k}). "
+        f"Kept laps: {report['kept_total']}; "
+        f"dropped_wet={dropped_wet}, dropped_outliers={dropped_outliers}."
+    )
+
+    return d, report
+
+
+# -----------------------------------------------------------------------------
+# Start deltas
+# -----------------------------------------------------------------------------
 def _compute_start_deltas(laps_raw: pd.DataFrame, ses: Any) -> pd.DataFrame:
     if laps_raw is None or len(laps_raw) == 0 or ses is None:
         return pd.DataFrame(columns=["driver", "team", "grid_pos", "pos_end_lap1", "start_delta"])
@@ -446,14 +558,15 @@ def _compute_start_deltas(laps_raw: pd.DataFrame, ses: Any) -> pd.DataFrame:
 
     out["grid_pos"] = pd.to_numeric(out["grid_pos"], errors="coerce")
     out["grid_pos"] = pd.to_numeric(out["grid_pos"], errors="coerce")
-    # If grid is missing (some sessions don’t have it), fall back to lap-1 order
     out["grid_pos"] = out["grid_pos"].fillna(out["pos_end_lap1"])
     out["start_delta"] = out["grid_pos"] - out["pos_end_lap1"]
     return out[["driver", "team", "grid_pos", "pos_end_lap1", "start_delta"]].dropna(
         subset=["pos_end_lap1"]).reset_index(drop=True)
 
 
-# -------- Session Loading --------
+# -----------------------------------------------------------------------------
+# Session Loading
+# -----------------------------------------------------------------------------
 def load_session(year: int, gp_or_round: Union[str, int], session: str) -> Tuple[Optional[pd.DataFrame], Optional[Any]]:
     """
     Load laps and session object.
@@ -470,26 +583,28 @@ def load_session(year: int, gp_or_round: Union[str, int], session: str) -> Tuple
         return None, None
 
 
+# -----------------------------------------------------------------------------
+# Load all (uses clean_laps)
+# -----------------------------------------------------------------------------
 def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Returns a list of event dicts with:
-      - 'race_laps': filtered pace laps (lap_ok == True)
+      - 'race_laps': cleaned pace laps (deterministic, dry-only/outlier-aware)
       - 'race_interactions': raw-lap interaction table
       - 'race_start_deltas': grid vs end-of-lap-1 deltas
       - (optional) 'quali_laps', 'quali_interactions'
-      - 'qa': dict of QA counters
+      - 'qa': dict of QA counters + rejection report
     """
     enable_cache(config["cache_dir"])
 
-    # NEW: read weather knobs (one-liner to make them live)
+    # Weather merge tolerance for interaction tables
     weather_cfg = (config.get("weather") or {})
     merge_tol_sec = int(weather_cfg.get("merge_tolerance_seconds", 120))
 
-    # Prefer full-season enumeration when config.season is present; otherwise fallback to legacy list
+    # Enumerate events
     season_cfg = config.get("season")
     if season_cfg is not None:
         events = enumerate_season_rounds(config)
-        # For logs: show first few
         preview = ", ".join([f"R{e['round']}" for e in events[:6]])
         logging.info(f"[load_data] Will attempt Q+R for {len(events)} rounds: {preview}{' …' if len(events) > 6 else ''}")
         gp_iter = [{"year": e["year"], "key": e["round"], "label": e["event_name"] or f"Round {e['round']}"} for e in events]
@@ -503,8 +618,6 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     attempted_sessions = 0
     loaded_events = 0
-
-    # NEW: loaded vs skipped labels
     loaded_labels: List[str] = []
     skipped_labels: List[str] = []
 
@@ -516,12 +629,12 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
         race_laps_raw, ses_r = load_session(year, key, "R")
         if race_laps_raw is None or len(race_laps_raw) == 0:
             print(f"[WARN] No race laps for {year} {label}")
-            skipped_labels.append(f"{year} {label}")  # NEW: record skip
+            skipped_labels.append(f"{year} {label}")
             continue
 
-        race_laps, qa_r = _derive_and_filter_tags(race_laps_raw, session_kind="R")
+        race_laps, rep_r = clean_laps(race_laps_raw, config, session_kind="R")
         race_inter = _build_interaction_table(race_laps_raw, ses_r, session_kind="R",
-                                              merge_tolerance_seconds=merge_tol_sec)  # NEW: pass tolerance
+                                              merge_tolerance_seconds=merge_tol_sec)
         start_deltas = _compute_start_deltas(race_laps_raw, ses_r)
 
         entry: Dict[str, Any] = {
@@ -530,7 +643,7 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             "race_laps": race_laps,
             "race_interactions": race_inter,
             "race_start_deltas": start_deltas,
-            "qa": {"race": qa_r},
+            "qa": {"race": rep_r},
         }
 
         # --- Quali ---
@@ -538,17 +651,17 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
             attempted_sessions += 1
             quali_laps_raw, ses_q = load_session(year, key, "Q")
             if quali_laps_raw is not None and len(quali_laps_raw) > 0:
-                quali_laps, qa_q = _derive_and_filter_tags(quali_laps_raw, session_kind="Q")
+                quali_laps, rep_q = clean_laps(quali_laps_raw, config, session_kind="Q")
                 quali_inter = _build_interaction_table(quali_laps_raw, ses_q, session_kind="Q",
-                                                       merge_tolerance_seconds=merge_tol_sec)  # NEW: pass tolerance
+                                                       merge_tolerance_seconds=merge_tol_sec)
                 entry["quali_laps"] = quali_laps
                 entry["quali_interactions"] = quali_inter
-                entry["qa"]["quali"] = qa_q
+                entry["qa"]["quali"] = rep_q
             else:
                 entry["quali_laps"] = None
                 entry["quali_interactions"] = None
 
-        # NEW: Weather medians per event (for viz and sim knobs)
+        # Weather medians per event
         entry["weather_summary"] = _summarize_event_weather(race_inter)
 
         # Optional diagnostics persistence
@@ -569,9 +682,9 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
 
         out.append(entry)
         loaded_events += 1
-        loaded_labels.append(f"{year} {label}")  # NEW: record loaded
+        loaded_labels.append(f"{year} {label}")
 
-    # NEW: human-friendly summary
+    # Summary
     if loaded_labels:
         logging.info("[summary] Loaded GPs (%d): %s", len(loaded_labels), "; ".join(loaded_labels))
     if skipped_labels:
@@ -583,7 +696,9 @@ def load_all_data(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return out
 
 
-# -------- Track Outline (fallbacks) --------
+# -----------------------------------------------------------------------------
+# Track Outline (fallbacks)
+# -----------------------------------------------------------------------------
 def get_track_outline(config: Dict[str, Any]) -> Optional[pd.DataFrame]:
     track_cfg = config.get("viz_track", {})
     year = int(track_cfg.get("year"))
@@ -628,7 +743,9 @@ def get_track_outline(config: Dict[str, Any]) -> Optional[pd.DataFrame]:
     return None
 
 
-# -------- Manual Test Runner --------
+# -----------------------------------------------------------------------------
+# Manual Test Runner
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
     cfg = load_config("config/config.yaml")
@@ -642,16 +759,15 @@ if __name__ == "__main__":
         needed = ["LapTimeSeconds", "driver", "compound", "stint_id", "lap_on_tyre",
                   "lap_number", "track_status", "lap_ok"]
         print("[INFO] Tagged fields present:", {k: (k in cols) for k in needed})
-        print("[INFO] Race laps kept (pace-only):", len(first["race_laps"]))
+        print("[INFO] Race laps kept (clean):", len(first["race_laps"]))
         if first.get("quali_laps") is not None:
-            print("[INFO] Quali laps kept (pace-only):", len(first["quali_laps"]))
+            print("[INFO] Quali laps kept (clean):", len(first["quali_laps"]))
 
         inter_cols = list(first["race_interactions"].columns)
         print("[INFO] Race interaction table columns (sample):", inter_cols[:10], "…")
         if not first["race_start_deltas"].empty:
             print("[INFO] Start deltas head:\n", first["race_start_deltas"].head())
 
-        # NEW: show weather summary presence
         print("[INFO] Weather summary for first event:", first.get("weather_summary", {}))
 
     outline = get_track_outline(cfg)
