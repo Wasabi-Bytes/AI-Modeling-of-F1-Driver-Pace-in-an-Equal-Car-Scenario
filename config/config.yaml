@@ -1,11 +1,25 @@
 # === Core paths ===
 cache_dir: "fastf1_cache"
 
+# === Determinism (global switches) ===
+deterministic: true         # master switch: prefer deterministic paths where supported
+random_seed: 42             # top-level seed (kept alongside legacy rng/season seeds)
+
 # === Data to load ===
 include_qualifying: true
 season:
   year: 2025
   include_sprint: true   # controls which weekends to enumerate; we still load Q+R
+
+# === Cleaning filters (single source of truth for lap selection) ===
+filters:
+  only_green_flag: true     # enforce TrackStatus == '1'
+  drop_pit_laps: true       # exclude in/out laps
+  dry_only: true            # drop wet/intermediate compounds
+  drop_outliers: true       # deterministic IQR/z-score in src/filters.py
+  outlier_method: "iqr"     # optional: "iqr" | "z"
+  iqr_k: 1.5
+  z_k: 3.0
 
 # ===== Weather (merge + simple temperature effect) =====
 weather:
@@ -61,9 +75,15 @@ quali_var_epsilon: 1e-6          # numeric guard for inverse-variance weights
 quali_evolution_adjust: true     # keep median-by-segment normalization
 
 # === Event-level blend (Race + Quali) ===
+# Legacy keys (kept for compatibility with existing code paths)
 wR: 0.6
 wQ: 0.4
 apply_bayes_shrinkage: true
+
+# New consolidated weights block
+weights:
+  w_race: 0.6
+  w_quali: 0.4
 
 # === Weighting controls (legacy; still supported) ===
 weighting:
@@ -72,6 +92,9 @@ weighting:
   half_life_days: 120              # used if recency_mode == "date_half_life"
   race_sample_weight: 1.0          # weight per race lap contributing (race_n)
   quali_sample_weight: 1.0         # weight per quali segment contributing (quali_k)
+
+# New top-level recency for convenience (mirrors weighting/aggregation)
+recency_decay: 0.92
 
 # === Shrinkage (Empirical Bayes baseline) ===
 shrinkage:
@@ -89,7 +112,7 @@ viz_track:
 
 # ===== Equal-car visualization (optional overrides) =====
 visualize_equal_race:
-  use_event_specific_deltas: false   # CHANGED: sanity run uses global deltas
+  use_event_specific_deltas: false
   target_gp_substr: "canadian"
   base_lap_sec: 90.0
   n_laps: 20
@@ -101,7 +124,7 @@ visualize_equal_race:
 # ===== Reliability model =====
 reliability:
   mode: "per_race"
-  per_race_dnf: 0.00          # CHANGED: disable DNFs for sanity check
+  per_race_dnf: 0.00          # keep DNFs off for sanity check
   typical_race_laps: 70
   # per_lap: 0.0015  # only if mode == "per_lap"
 
@@ -137,6 +160,8 @@ overtaking:
   detection_offset_fraction: 0.03
   drs_min_enable_lap: 3
   drs_cooldown_after_sc_laps: 2
+  # deterministic overtake model switch (consumed by sim if implemented)
+  model: "deterministic"
   track_overrides:
     monaco:
       dirty_air_penalty: 0.35
@@ -178,16 +203,21 @@ aggregation:
 
 # ===== Event-delta usage =====
 event_deltas:
-  use_event_specific: false   # FYI: the viz script ignores this; it uses visualize_equal_race.use_event_specific_deltas
+  use_event_specific: false
 
 # ===== Reproducibility & diversity =====
 rng:
-  seed: 2025
+  seed: 42                # align with top-level random_seed for consistency
   per_event_stream: true
   per_run_stream: true
 
+# ===== Simulation master block (deterministic overrides) =====
 simulation:
   runs: 5000
+  add_noise: false        # disable per-lap jitter in pure-deterministic mode
+  dnf_per_lap: 0.0        # force-override DNFs per-lap to zero
+  safety_car: "off"       # "off" | "deterministic" | "stochastic" (if implemented)
+  overtake_model: "deterministic"
   entropy_guard:
     min_unique_orders: 0.60
 
