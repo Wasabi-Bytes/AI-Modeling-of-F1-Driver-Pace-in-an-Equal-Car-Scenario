@@ -13,7 +13,8 @@ import pandas as pd
 
 # Statsmodels for FE/splines + robust SEs + MixedLM
 import statsmodels.formula.api as smf
-from patsy import bs
+import statsmodels.api as sm
+from patsy import bs, dmatrix
 
 # (Keep sklearn around for potential future ridge; not used for OLS inference now)
 from sklearn.linear_model import Ridge
@@ -736,20 +737,16 @@ def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     used_track = (formula != base)
 
     # --- MixedLM specification ---
-    # Group random intercept on driver; crossed variance components for team & event.
-    # This gives us per-driver BLUPs while accounting for team/event heterogeneity.
     vc = {
         "team_vc": "0 + C(team)",
         "event_vc": "0 + C(event)",
     }
-    # If you want to try a coarse "track" vc later, you can add: "track_vc": "0 + C(track_type)" when present.
 
-    # Fit with REML, try a couple of optimizers
     def _fit_mixed(method: str):
         return smf.mixedlm(
             formula,
             data=d,
-            groups=d["driver"],     # random intercept per driver
+            groups=d["driver"],
             re_formula="1",
             vc_formula=vc
         ).fit(reml=True, method=method, disp=False)
@@ -762,7 +759,7 @@ def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
             tried.append(m)
             if result.converged:
                 break
-        except Exception as e:
+        except Exception:
             tried.append(f"{m}:fail")
             continue
 
@@ -770,17 +767,12 @@ def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
         logger.warning("[mixed_cc] MixedLM did not converge (tried=%s); falling back to OLS team model.", ",".join(tried))
         return race_metrics_ols_team(d, cfg)
 
-    # ------------ Extract driver BLUPs ------------
-    # random_effects: dict keyed by driver -> array([u_driver_intercept])
     re = result.random_effects
-    # BLUP sign: model adds +u_driver to LapTime; negative => faster
     drv_blup = pd.Series({k: float(np.ravel(v)[0]) for k, v in re.items()}, name="u_driver")
 
-    # Laps per driver×team for a reasonable "exposure" count
     grp = d.groupby(["driver", "team"], dropna=False)
     n_by_dt = grp.size().rename("race_n")
 
-    # Approx driver-level SE: residual SEM by driver (conservative, since vc RE SE per-level not directly exposed)
     resid = result.resid
     d_res = d.assign(__resid__=resid)
     sem_by_driver = d_res.groupby("driver")["__resid__"].std(ddof=1) / np.sqrt(
@@ -788,14 +780,12 @@ def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     )
     sem_by_driver = sem_by_driver.rename("race_se_s")
 
-    # Assemble output over driver×team (so downstream stays consistent)
     out = (
         n_by_dt.reset_index()
         .merge(drv_blup.rename("race_delta_s").reset_index().rename(columns={"index": "driver"}), on="driver", how="left")
         .merge(sem_by_driver.reset_index(), on="driver", how="left")
     )
 
-    # Model label
     flags = []
     if used_temp:
         flags.append("temp")
@@ -804,7 +794,6 @@ def race_metrics_mixed_cc(race_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.Data
     suffix = ("," + "+".join(flags)) if flags else ""
     out["race_model"] = f"mixed_cc(reml{suffix})"
 
-    # Sort: faster (more negative) first
     out = out[["driver", "team", "race_delta_s", "race_se_s", "race_n", "race_model"]].sort_values("race_delta_s").reset_index(drop=True)
     return out
 
@@ -824,10 +813,63 @@ def _winsorize_series(s: pd.Series, lower_q: float, upper_q: float) -> pd.Series
     return s
 
 
+def _parse_session_time_col(df: pd.DataFrame) -> pd.Series:
+    """
+    Get a numeric 't' (0..1) representing when a lap occurred within the segment.
+    Prefer LapStartTime; fallback to Time; otherwise use row-order rank.
+    """
+    if "LapStartTime" in df.columns:
+        t = pd.to_timedelta(df["LapStartTime"], errors="coerce").dt.total_seconds()
+    elif "Time" in df.columns:
+        t = pd.to_timedelta(df["Time"], errors="coerce").dt.total_seconds()
+    else:
+        # Monotone surrogate: within-session rank index
+        t = pd.Series(np.arange(len(df)), index=df.index, dtype=float)
+    t = t - np.nanmin(t.values) if np.isfinite(t).any() else t
+    denom = (np.nanmax(t.values) - np.nanmin(t.values)) if np.isfinite(t).any() else 1.0
+    denom = denom if denom > 0 else 1.0
+    return (t / denom).fillna(0.0)
+
+
+def _evolution_adjust_by_session(d: pd.DataFrame, df_evo: int = 5) -> pd.DataFrame:
+    """
+    For each quali segment (Q1/Q2/Q3 in 'session'), fit:
+        LapTimeSeconds ~ bs(t, df=df_evo, include_intercept=True)
+    using robust HC3 covariance, then take residuals as evolution-corrected times.
+    """
+    out = []
+    for sess, g in d.groupby("session", dropna=False):
+        gg = g.copy()
+        t = _parse_session_time_col(gg)
+        gg["__t__"] = t
+
+        # Guard: require at least df_evo+2 points to fit a spline sensibly
+        n = int(len(gg))
+        df_use = max(2, min(df_evo, max(2, n - 2)))
+        try:
+            X = dmatrix(f"bs(__t__, df={df_use}, include_intercept=True) - 1", gg, return_type="dataframe")
+            y = pd.to_numeric(gg["LapTimeSeconds"], errors="coerce")
+            model = sm.OLS(y, X, missing="drop").fit(cov_type="HC3")
+            pred = pd.Series(model.predict(X), index=gg.index)
+            gg["evo_resid"] = y - pred
+            gg["evo_df"] = df_use
+        except Exception:
+            # Fallback: center within-session median if the fit fails
+            med = float(pd.to_numeric(gg["LapTimeSeconds"], errors="coerce").median())
+            gg["evo_resid"] = pd.to_numeric(gg["LapTimeSeconds"], errors="coerce") - med
+            gg["evo_df"] = -1
+        out.append(gg)
+    return pd.concat(out, axis=0).sort_index()
+
+
 def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd.DataFrame:
     """
-    Evolution-aware quali metric (normalize within Q1/Q2/Q3, precision-weight per segment).
-    Track effects are NOT used here (normalization already handles session evolution); we may carry tags only.
+    Evolution-aware quali metric:
+      - Drop invalid/tow/off-track if detectable.
+      - Adjust for within-segment (Q1/Q2/Q3) track evolution by regressing lap time on a spline of time/ordering.
+      - Take each driver's best evolution-adjusted lap per segment.
+      - Compare to team-best per segment.
+      - Precision-weight combine segments to produce per-driver quali delta & SE.
     """
     out_cols = ["driver", "team", "quali_delta_s", "quali_se_s", "quali_k"]
 
@@ -839,53 +881,72 @@ def quali_metrics_within_team(quali_df: pd.DataFrame, cfg: Dict[str, Any]) -> pd
     d = _ensure_team_column(d)
     d = _ensure_session_column(d)
 
+    # Basic filters / guards
     d["LapTimeSeconds"] = pd.to_numeric(d.get("LapTimeSeconds", d.get("LapTime")), errors="coerce")
-    if "lap_ok" in d.columns:
-        d = d[d["lap_ok"].astype(bool)]
-    if "is_valid" in d.columns:
-        d = d[d["is_valid"].astype(bool)]
+
+    # Respect prior cleaning flags if present
+    for col in ("lap_ok", "IsAccurate", "is_valid", "Deleted", "IsDeleted"):
+        if col in d.columns:
+            if col in ("Deleted", "IsDeleted"):
+                d = d[~d[col].astype(bool)]
+            else:
+                d = d[d[col].astype(bool)]
+    # If any wet compounds slipped through, drop them
+    if "compound" in d.columns:
+        uc = d["compound"].astype(str).str.upper()
+        wet = uc.isin({"INTERMEDIATE", "WET", "FULL WET", "EXTREME WET"})
+        d = d.loc[~wet]
+
     d = d[np.isfinite(d["LapTimeSeconds"])]
     if d.empty:
         return pd.DataFrame(columns=out_cols)
 
-    # 1) Segment medians & normalization
-    seg_med = d.groupby("session")["LapTimeSeconds"].transform("median")
-    d["norm_lt"] = d["LapTimeSeconds"] - seg_med
+    # --- Evolution adjustment (per Q segment) ---
+    use_evo = bool(cfg.get("quali_evolution_adjust", True))
+    evo_df = int(cfg.get("quali_evolution_df", 5))
+    if use_evo:
+        d = _evolution_adjust_by_session(d, df_evo=evo_df)
+        base_col = "evo_resid"
+    else:
+        # Fallback: segment-centering (older behavior)
+        seg_med = d.groupby("session")["LapTimeSeconds"].transform("median")
+        d["norm_lt"] = d["LapTimeSeconds"] - seg_med
+        base_col = "norm_lt"
 
-    # 2) Winsorization
+    # Winsorize within session to prune residual outliers (e.g., traffic, micro off)
     use_winsor = bool(cfg.get("quali_winsorize", True))
     q_low = float(cfg.get("quali_winsor_lower_q", 0.00))
     q_high = float(cfg.get("quali_winsor_upper_q", 0.05))
     if use_winsor:
-        d["norm_lt"] = (
-            d.groupby("session", group_keys=False)["norm_lt"]
+        d[base_col] = (
+            d.groupby("session", group_keys=False)[base_col]
             .apply(lambda s: _winsorize_series(s, q_low, q_high))
         )
 
-    # 3) Optional top-k after normalization
+    # Optional top-k per driver×segment after normalization
     use_topk = bool(cfg.get("quali_use_topk_after_norm", False))
     k = int(cfg.get("quali_top_k", 3))
     if use_topk:
-        d = d.sort_values("norm_lt").groupby(["driver", "team", "session"], as_index=False).head(k)
+        d = d.sort_values(base_col).groupby(["driver", "team", "session"], as_index=False).head(k)
 
-    # 4) Driver-session best lap
+    # Best per driver×segment on adjusted metric
     drv_sess = (
         d.groupby(["driver", "team", "session"], as_index=False)
-        .agg(best_norm_lt=("norm_lt", "min"), laps_n=("norm_lt", "size"), laps_sd=("norm_lt", "std"))
+        .agg(best_adj=(base_col, "min"), laps_n=(base_col, "size"), laps_sd=(base_col, "std"))
     )
     drv_sess["var_ds"] = (drv_sess["laps_sd"].fillna(0.0) ** 2) / drv_sess["laps_n"].clip(lower=1)
 
-    # 5) Team best per segment
+    # Team best per segment
     team_best = (
-        drv_sess.groupby(["team", "session"])["best_norm_lt"]
+        drv_sess.groupby(["team", "session"])["best_adj"]
         .min()
-        .rename("team_best_norm")
+        .rename("team_best_adj")
         .reset_index()
     )
     g = drv_sess.merge(team_best, on=["team", "session"], how="left")
-    g["gap_s"] = g["best_norm_lt"] - g["team_best_norm"]
+    g["gap_s"] = g["best_adj"] - g["team_best_adj"]
 
-    # 6) Precision-weighted combine across segments
+    # Precision-weighted combine across segments
     eps = float(cfg.get("quali_var_epsilon", 1e-6))
     g["w"] = 1.0 / (g["var_ds"].replace(0.0, eps))
 
